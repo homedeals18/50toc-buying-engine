@@ -1,12 +1,11 @@
-import { expect, test } from '@playwright/test';
+import { chromium, expect, test as base } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const artifactRoot = path.resolve(process.cwd(), '../../artifacts/bjs');
 const screenshotDir = path.join(artifactRoot, 'screenshots');
 const logDir = path.join(artifactRoot, 'logs');
-const storageDir = path.join(artifactRoot, 'storage');
-const authStatePath = path.join(storageDir, 'bjs-auth-state.json');
+const profileDir = path.join(artifactRoot, 'profile');
 const searchTerm = 'Blue Diamond Almonds 0.75 oz';
 const manualLoginTimeout = Number(process.env.BJS_MANUAL_LOGIN_TIMEOUT_MS ?? 10 * 60_000);
 
@@ -14,9 +13,49 @@ async function ensureArtifactDirs() {
   await Promise.all([
     mkdir(screenshotDir, { recursive: true }),
     mkdir(logDir, { recursive: true }),
-    mkdir(storageDir, { recursive: true })
+    mkdir(profileDir, { recursive: true })
   ]);
 }
+
+
+async function failIfAccessDenied(page, label = 'current page') {
+  const title = await page.title().catch(() => '');
+  const body = await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '');
+  const url = page.url();
+  if (/access\s+denied/i.test(`${title}
+${body}`)) {
+    await saveStep(page, `access-denied-${label}`);
+    throw new Error(`BJ's Access Denied detected on ${label} (${url}). Stop immediately; the persistent profile may need manual verification or BJ's may be blocking automation.`);
+  }
+}
+
+async function gotoAndCheck(page, url, options = {}, label = String(url)) {
+  const response = await page.goto(url, options);
+  await failIfAccessDenied(page, label);
+  return response;
+}
+
+const test = base.extend({
+  context: async ({}, use) => {
+    await ensureArtifactDirs();
+    const context = await chromium.launchPersistentContext(profileDir, {
+      baseURL: 'https://www.bjs.com',
+      headless: false,
+      viewport: { width: 1440, height: 1000 },
+      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36',
+      args: ['--disable-dev-shm-usage', '--no-sandbox']
+    });
+    try {
+      await use(context);
+    } finally {
+      await context.close();
+    }
+  },
+  page: async ({ context }, use) => {
+    const page = context.pages()[0] ?? await context.newPage();
+    await use(page);
+  }
+});
 
 async function saveStep(page, name, details = {}) {
   await ensureArtifactDirs();
@@ -25,7 +64,7 @@ async function saveStep(page, name, details = {}) {
   await page.screenshot({ path: screenshotPath, fullPage: true });
   await writeFile(
     path.join(logDir, `${safeName}.json`),
-    JSON.stringify({ ...details, url: page.url(), title: await page.title(), savedAt: new Date().toISOString(), screenshotPath }, null, 2)
+    JSON.stringify({ ...details, url: page.url(), title: await page.title().catch(() => ''), savedAt: new Date().toISOString(), screenshotPath }, null, 2)
   );
   return screenshotPath;
 }
@@ -82,14 +121,13 @@ async function isAuthenticated(page) {
 }
 
 async function ensureAuthenticated(page) {
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  await gotoAndCheck(page, '/', { waitUntil: 'domcontentloaded', timeout: 60_000 }, 'homepage');
   await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
   await clickCookieOrModalDismissers(page);
   await saveStep(page, '01-bjs-homepage-before-auth-check');
 
   if (await isAuthenticated(page)) {
-    await page.context().storageState({ path: authStatePath });
-    return { authenticated: true, authStatePath, loginMode: 'reused-existing-session' };
+    return { authenticated: true, profileDir, loginMode: 'reused-persistent-profile' };
   }
 
   const signIn = page.locator('a:has-text("Sign In"), button:has-text("Sign In"), text=/sign\\s*in|log\\s*in/i').first();
@@ -98,24 +136,25 @@ async function ensureAuthenticated(page) {
   }
 
   await saveStep(page, '02-bjs-login-required');
-  console.log(`BJ's login is required. Complete login in the opened browser. The test will wait up to ${manualLoginTimeout} ms, then save ${authStatePath}.`);
+  console.log(`BJ's login is required. Complete login in the opened headed Chromium browser. The test will wait up to ${manualLoginTimeout} ms, then reuse the persistent profile at ${profileDir} on future runs.`);
   await page.waitForFunction(() => /sign\s*out|log\s*out|my\s+account|membership|account/i.test(document.body.innerText), null, { timeout: manualLoginTimeout });
-  await page.context().storageState({ path: authStatePath });
+  await failIfAccessDenied(page, 'post-login');
   await saveStep(page, '03-bjs-login-complete');
-  return { authenticated: true, authStatePath, loginMode: 'manual-login-saved' };
+  return { authenticated: true, profileDir, loginMode: 'manual-login-saved-to-persistent-profile' };
 }
 
 async function searchForProduct(page) {
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  await gotoAndCheck(page, '/', { waitUntil: 'domcontentloaded', timeout: 60_000 }, 'homepage-search');
   await clickCookieOrModalDismissers(page);
   const searchBox = page.locator('input[type="search"], input[placeholder*="Search" i], input[aria-label*="Search" i], input[name*="search" i]').first();
   if (await searchBox.isVisible({ timeout: 15_000 }).catch(() => false)) {
     await searchBox.fill(searchTerm);
     await Promise.all([page.waitForLoadState('domcontentloaded').catch(() => undefined), searchBox.press('Enter')]);
   } else {
-    await page.goto(`/search/${encodeURIComponent(searchTerm)}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await gotoAndCheck(page, `/search/${encodeURIComponent(searchTerm)}`, { waitUntil: 'domcontentloaded', timeout: 60_000 }, 'search-results');
   }
   await page.waitForLoadState('networkidle', { timeout: 25_000 }).catch(() => undefined);
+  await failIfAccessDenied(page, 'search-results');
   await saveStep(page, '04-blue-diamond-almonds-results', { searchTerm });
 }
 
@@ -129,6 +168,7 @@ async function openFirstMatchingProduct(page) {
     await Promise.all([page.waitForLoadState('domcontentloaded').catch(() => undefined), fallback.click()]);
   }
   await page.waitForLoadState('networkidle', { timeout: 25_000 }).catch(() => undefined);
+  await failIfAccessDenied(page, 'product-page');
   await saveStep(page, '05-first-matching-product-opened');
 }
 
@@ -164,9 +204,10 @@ async function verifyCartContainsItem(page, productName) {
   if (await cartLink.isVisible({ timeout: 8_000 }).catch(() => false)) {
     await Promise.all([page.waitForLoadState('domcontentloaded').catch(() => undefined), cartLink.click()]);
   } else {
-    await page.goto('/cart', { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await gotoAndCheck(page, '/cart', { waitUntil: 'domcontentloaded', timeout: 60_000 }, 'cart');
   }
   await page.waitForLoadState('networkidle', { timeout: 25_000 }).catch(() => undefined);
+  await failIfAccessDenied(page, 'cart');
   await saveStep(page, '07-cart-before-checkout-stop');
   const body = await page.locator('body').innerText({ timeout: 15_000 });
   const firstProductWord = productName?.split(/\s+/).find((word) => word.length > 3) ?? 'Almond';

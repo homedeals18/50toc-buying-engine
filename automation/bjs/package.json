@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
-    "test:blue-diamond": "playwright test tests/blue-diamond-almonds.spec.js --project=chromium"
+    "test:blue-diamond": "playwright test tests/blue-diamond-almonds.spec.js --project=chromium",
+    "test:blue-diamond:headed": "BJS_HEADLESS=false playwright test tests/blue-diamond-almonds.spec.js --project=chromium --headed"
   },
   "devDependencies": {
     "@playwright/test": "latest",
