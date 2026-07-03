@@ -9,3 +9,13 @@ dist/
 build/
 .coverage
 .DS_Store
+artifacts/bjs/*
+!artifacts/bjs/.gitkeep
+!artifacts/bjs/logs/
+!artifacts/bjs/logs/.gitkeep
+!artifacts/bjs/screenshots/
+!artifacts/bjs/screenshots/.gitkeep
+artifacts/bjs/logs/*
+!artifacts/bjs/logs/.gitkeep
+artifacts/bjs/screenshots/*
+!artifacts/bjs/screenshots/.gitkeep

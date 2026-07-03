@@ -67,3 +67,21 @@ Run the backend unit tests from the repository root:
 cd backend
 python -m unittest discover -s tests
 ```
+
+## BJ's local automation
+
+The BJ's automation is a Playwright-based local workflow for validating the Blue Diamond Almonds shopping path and saving reproducible artifacts.
+
+One-command setup:
+
+```bash
+./scripts/setup-bjs-automation.sh
+```
+
+One-command run:
+
+```bash
+./scripts/run-bjs-blue-diamond-test.sh
+```
+
+The setup script installs the BJ's automation Node dependencies, installs Chromium with Playwright's required system dependencies, and verifies that Chromium launches. The run script verifies browser launch again, runs the Blue Diamond Almonds test, and writes screenshots and logs under `artifacts/bjs/`.

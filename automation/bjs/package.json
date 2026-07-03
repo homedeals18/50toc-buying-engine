@@ -1,0 +1,14 @@
+{
+  "name": "bjs-automation-local",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:blue-diamond": "playwright test tests/blue-diamond-almonds.spec.js --project=chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "latest",
+    "playwright": "latest"
+  }
+}
