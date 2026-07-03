@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -32,12 +32,33 @@ class Store(TimestampMixin, Base):
 
 class Product(TimestampMixin, Base):
     __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("store_id", "store_sku", name="uq_products_store_sku"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"))
-    name: Mapped[str] = mapped_column(String(255), index=True)
-    sku: Mapped[str | None] = mapped_column(String(100), index=True)
-    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    upc: Mapped[str] = mapped_column(String(32), index=True)
+    brand: Mapped[str | None] = mapped_column(String(255), index=True)
+    product_name: Mapped[str] = mapped_column(String(255), index=True)
+    size: Mapped[str | None] = mapped_column(String(100))
+    package_quantity: Mapped[int | None] = mapped_column(Integer)
+    category: Mapped[str | None] = mapped_column(String(100), index=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    store_sku: Mapped[str | None] = mapped_column(String(100), index=True)
+    online_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    shelf_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    purchase_limit: Mapped[int | None] = mapped_column(Integer)
+    store_location: Mapped[str | None] = mapped_column(String(255))
+    amazon_asin: Mapped[str | None] = mapped_column(String(20), index=True)
+    current_fba_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    amazon_retail_seller_present: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    number_of_fba_sellers: Mapped[int | None] = mapped_column(Integer)
+    hazmat: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    high_risk: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    eligible: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    rule_engine_decision: Mapped[str | None] = mapped_column(String(50), index=True)
+    warning_flags: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    rejection_reasons: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    last_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
     store: Mapped[Store] = relationship(back_populates="products")
 
 
