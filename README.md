@@ -58,3 +58,12 @@ npm run dev
 ## Store connectors
 
 Store integrations should implement `StoreConnector` from `backend/app/connectors/base/client.py` inside their own connector package. The placeholder packages are reserved for future BJ's, Costco Business Center, Sam's Club, and Walmart implementations.
+
+## Running tests
+
+Run the backend unit tests from the repository root:
+
+```bash
+cd backend
+python -m unittest discover -s tests
+```
