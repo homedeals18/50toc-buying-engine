@@ -70,7 +70,7 @@ python -m unittest discover -s tests
 
 ## BJ's local automation
 
-The BJ's automation is a Playwright-based local workflow for validating the Blue Diamond Almonds shopping path and saving reproducible artifacts.
+The BJ's automation is a Playwright-based local end-to-end workflow for validating the authenticated Blue Diamond Almonds shopping path. It reuses a saved BJ's browser session when `artifacts/bjs/storage/bjs-auth-state.json` exists; otherwise it opens BJ's and waits for a one-time manual login before saving that browser state for future runs.
 
 One-command setup:
 
@@ -84,4 +84,12 @@ One-command run:
 ./scripts/run-bjs-blue-diamond-test.sh
 ```
 
-The setup script installs the BJ's automation Node dependencies, installs Chromium with Playwright's required system dependencies, and verifies that Chromium launches. The run script verifies browser launch again, runs the Blue Diamond Almonds test, and writes screenshots and logs under `artifacts/bjs/`.
+The setup script installs the BJ's automation Node dependencies, installs Chromium with Playwright's required system dependencies, and verifies that Chromium launches. The run script verifies browser launch again, runs the Blue Diamond Almonds test, searches for `Blue Diamond Almonds 0.75 oz`, opens the first matching product, extracts product name/SKU/UPC/price/availability/quantity limits/coupons/package size, adds one item to the cart, verifies the cart, and stops before checkout without placing an order. Screenshots, product details, and the complete execution report are written under `artifacts/bjs/`.
+
+For first-time authentication, run headed so you can complete BJ's login manually:
+
+```bash
+BJS_HEADLESS=false ./scripts/run-bjs-blue-diamond-test.sh
+```
+
+The test waits up to 10 minutes by default for manual login. Override this with `BJS_MANUAL_LOGIN_TIMEOUT_MS` if needed. After login succeeds, Playwright saves `artifacts/bjs/storage/bjs-auth-state.json` and future runs reuse that session when BJ's still accepts it.
