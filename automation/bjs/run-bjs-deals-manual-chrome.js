@@ -102,7 +102,7 @@ async function main() {
   }
 
   const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const child = spawn(command, ['playwright', 'test', 'tests/clearance-discovery.spec.js', '--project=chromium', '--headed'], {
+  const child = spawn(command, ['playwright', 'test', 'tests/deal-discovery.spec.js', '--project=chromium', '--headed'], {
     stdio: 'inherit',
     env: { ...process.env, BJS_BROWSER_MODE: 'manual-chrome', BJS_CHROME_CDP_ENDPOINT: cdpEndpoint },
     windowsHide: false

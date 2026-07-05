@@ -1,8 +1,6 @@
 {
   "private": true,
   "scripts": {
-    "test:blue-diamond:headed": "npm --prefix automation/bjs run test:blue-diamond:headed",
-    "test:blue-diamond:manual-chrome": "npm --prefix automation/bjs run test:blue-diamond:manual-chrome",
-    "scrape:clearance:manual-chrome": "npm --prefix automation/bjs run scrape:clearance:manual-chrome"
+    "scrape:bjs:deals:manual-chrome": "npm --prefix automation/bjs run scrape:bjs:deals:manual-chrome"
   }
 }

@@ -1,4 +1,4 @@
-import { chromium, expect, test as base } from '@playwright/test';
+import { chromium, test as base } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -9,8 +9,12 @@ const profileDir = path.join(artifactRoot, 'profile');
 const manualChromeEndpoint = process.env.BJS_CHROME_CDP_ENDPOINT ?? 'http://127.0.0.1:9222';
 const browserMode = process.env.BJS_BROWSER_MODE ?? 'playwright';
 const manualLoginTimeout = Number(process.env.BJS_MANUAL_LOGIN_TIMEOUT_MS ?? 10 * 60_000);
-const maxListingScreenshots = Number(process.env.BJS_CLEARANCE_MAX_LISTING_SCREENSHOTS ?? 3);
-const maxProductPages = Number(process.env.BJS_CLEARANCE_MAX_PRODUCT_PAGES ?? 12);
+const maxListingScreenshots = Number(process.env.BJS_DEALS_MAX_LISTING_SCREENSHOTS ?? 2);
+const maxProductPagesPerDealSource = Number(process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 12);
+const dealSources = [
+  { name: 'Clearance', searchTerm: 'clearance' },
+  { name: 'Wow Deals', searchTerm: 'wow deals' }
+];
 
 async function ensureArtifactDirs() {
   await Promise.all([
@@ -149,7 +153,11 @@ async function clickAndWaitForNavigation(page, locator, label) {
   await failIfAccessDenied(page, label);
 }
 
-async function searchSiteForClearance(page) {
+function productCardLocators(page) {
+  return page.locator('[data-testid*="product" i], [class*="product-card" i], [class*="productTile" i], [class*="product-tile" i], li:has(a[href*="/product"]), li:has(a[href*="/p/"]), article:has(a[href*="/product"]), article:has(a[href*="/p/"])');
+}
+
+async function searchSiteForDealSource(page, dealSource) {
   const searchSelectors = [
     'input[type="search"]',
     'input[placeholder*="search" i]',
@@ -160,27 +168,28 @@ async function searchSiteForClearance(page) {
   for (const selector of searchSelectors) {
     const searchBox = page.locator(selector).first();
     if (await searchBox.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await searchBox.fill('clearance');
+      await searchBox.fill(dealSource.searchTerm);
       await Promise.all([
         page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => undefined),
         searchBox.press('Enter')
       ]);
       await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
-      await failIfAccessDenied(page, 'clearance-search-results');
+      await failIfAccessDenied(page, `${dealSource.name}-search-results`);
       return true;
     }
   }
   return false;
 }
 
-async function navigateToClearance(page) {
-  await gotoAndCheck(page, '/', { waitUntil: 'domcontentloaded', timeout: 60_000 }, 'homepage-clearance');
+async function navigateToDealSource(page, dealSource) {
+  await gotoAndCheck(page, '/', { waitUntil: 'domcontentloaded', timeout: 60_000 }, `${dealSource.name}-homepage`);
   await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
   await clickCookieOrModalDismissers(page);
 
-  const directClearanceLink = page.locator('a:has-text("Clearance"), button:has-text("Clearance")').first();
-  if (await directClearanceLink.isVisible({ timeout: 8_000 }).catch(() => false)) {
-    await clickAndWaitForNavigation(page, directClearanceLink, 'clearance-link');
+  const linkPattern = new RegExp(dealSource.name.replace(/\s+/g, '\\s+'), 'i');
+  const directDealLink = page.locator('a, button').filter({ hasText: linkPattern }).first();
+  if (await directDealLink.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await clickAndWaitForNavigation(page, directDealLink, `${dealSource.name}-link`);
   } else {
     const menuTriggers = [
       'button:has-text("Shop")',
@@ -196,51 +205,41 @@ async function navigateToClearance(page) {
       if (await trigger.isVisible({ timeout: 2_000 }).catch(() => false)) {
         await trigger.click({ timeout: 5_000 }).catch(() => undefined);
         await page.waitForTimeout(1_000);
-        const nestedClearanceLink = page.locator('a:has-text("Clearance"), button:has-text("Clearance")').first();
-        if (await nestedClearanceLink.isVisible({ timeout: 3_000 }).catch(() => false)) {
-          await clickAndWaitForNavigation(page, nestedClearanceLink, 'clearance-menu-link');
+        const nestedDealLink = page.locator('a, button').filter({ hasText: linkPattern }).first();
+        if (await nestedDealLink.isVisible({ timeout: 3_000 }).catch(() => false)) {
+          await clickAndWaitForNavigation(page, nestedDealLink, `${dealSource.name}-menu-link`);
           break;
         }
       }
     }
   }
 
-  if (!/clearance/i.test(page.url())) {
-    const searched = await searchSiteForClearance(page);
+  if (!new RegExp(dealSource.searchTerm.replace(/\s+/g, '|'), 'i').test(page.url())) {
+    const searched = await searchSiteForDealSource(page, dealSource);
     if (!searched) {
-      const screenshotPath = await saveStep(page, 'clearance-navigation-failed-no-search');
-      throw new Error(`Unable to locate BJ's Clearance through homepage navigation or site search controls. Reached ${page.url()}. Screenshot saved to ${screenshotPath}.`);
+      const screenshotPath = await saveStep(page, `${dealSource.name}-navigation-failed-no-search`);
+      throw new Error(`Unable to locate BJ's ${dealSource.name} through homepage navigation or site search controls. Reached ${page.url()}. Screenshot saved to ${screenshotPath}.`);
     }
   }
 
-  const searchResultClearanceLink = page.locator('a:has-text("Clearance"), button:has-text("Clearance")').first();
-  if (!/clearance/i.test(page.url()) && await searchResultClearanceLink.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await clickAndWaitForNavigation(page, searchResultClearanceLink, 'clearance-search-result-link');
-  }
-
   await page.waitForLoadState('networkidle', { timeout: 25_000 }).catch(() => undefined);
-  await failIfAccessDenied(page, 'clearance-page');
+  await failIfAccessDenied(page, `${dealSource.name}-page`);
   const hasProductTiles = await productCardLocators(page).first().isVisible({ timeout: 10_000 }).catch(() => false);
-  const screenshotPath = await saveStep(page, hasProductTiles ? '04-clearance-page' : '04-clearance-page-no-products', { hasProductTiles });
+  const screenshotPath = await saveStep(page, hasProductTiles ? `04-${dealSource.name}-page` : `04-${dealSource.name}-page-no-products`, { hasProductTiles });
   if (!hasProductTiles) {
-    throw new Error(`BJ's Clearance navigation reached ${page.url()}, but no product tiles were visible. Screenshot saved to ${screenshotPath}.`);
+    throw new Error(`BJ's ${dealSource.name} navigation reached ${page.url()}, but no product tiles were visible. Screenshot saved to ${screenshotPath}.`);
   }
-  await writeFile(path.join(logDir, 'clearance-url.txt'), `${page.url()}\n`);
+  await writeFile(path.join(logDir, `${dealSource.name.toLowerCase().replace(/\s+/g, '-')}-url.txt`), `${page.url()}\n`);
   return page.url();
 }
 
-function productCardLocators(page) {
-  return page.locator('[data-testid*="product" i], [class*="product-card" i], [class*="productTile" i], [class*="product-tile" i], li:has(a[href*="/product"]), div:has(> a[href*="/product"])');
-}
-
-
-async function extractListingProducts(page) {
+async function extractListingProducts(page, dealSource) {
   await page.mouse.wheel(0, 1800).catch(() => undefined);
   await page.waitForTimeout(1_000);
   await page.mouse.wheel(0, 1800).catch(() => undefined);
   await page.waitForTimeout(1_000);
 
-  return page.evaluate(() => {
+  return page.evaluate(({ dealSourceName }) => {
     const absUrl = (value) => {
       if (!value) return null;
       try { return new URL(value, location.href).toString(); } catch { return null; }
@@ -248,40 +247,48 @@ async function extractListingProducts(page) {
     const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
     const priceMatches = (text) => [...text.matchAll(/\$\s*\d+(?:,\d{3})*(?:\.\d{2})?/g)].map((match) => match[0].replace(/\s+/g, ''));
     const cardNodes = [...document.querySelectorAll('[data-testid*="product" i], [class*="product-card" i], [class*="productTile" i], [class*="product-tile" i], li, article')]
-      .filter((node) => node.querySelector('a[href*="/product"], a[href*="/p/"]') && /\$|clearance|save|off|coupon|available|stock/i.test(node.textContent || ''));
+      .filter((node) => node.querySelector('a[href*="/product"], a[href*="/p/"]') && /\$|clearance|wow|save|off|coupon|available|stock/i.test(node.textContent || ''));
 
     const seen = new Set();
     return cardNodes.map((card) => {
       const link = card.querySelector('a[href*="/product"], a[href*="/p/"]');
-      const url = absUrl(link?.getAttribute('href'));
-      if (!url || seen.has(url)) return null;
-      seen.add(url);
+      const productUrl = absUrl(link?.getAttribute('href'));
+      if (!productUrl || seen.has(productUrl)) return null;
+      seen.add(productUrl);
       const text = clean(card.textContent) || '';
       const prices = priceMatches(text);
       const image = card.querySelector('img');
-      const name = clean(card.querySelector('[data-testid*="name" i], [class*="name" i], h2, h3, a[href*="/product"], a[href*="/p/"]')?.textContent) || clean(image?.getAttribute('alt'));
+      const productName = clean(card.querySelector('[data-testid*="name" i], [class*="name" i], h2, h3, a[href*="/product"], a[href*="/p/"]')?.textContent) || clean(image?.getAttribute('alt'));
       return {
-        name,
+        supplier: "BJ's Wholesale Club",
+        dealSource: dealSourceName,
+        productName,
+        brand: null,
         sku: clean(text.match(/(?:SKU|Item|Item #|Model)\s*[:#-]?\s*([A-Z0-9-]{3,})/i)?.[1]),
-        price: prices[0] ?? null,
-        originalPrice: prices[1] ?? null,
-        discount: clean(text.match(/(?:save\s*\$?\d+(?:\.\d{2})?|\d+%\s*off|clearance)/i)?.[0]),
-        availability: clean(text.match(/(?:in stock|out of stock|available|pickup|delivery|shipping|same-day delivery)[^.]{0,80}/i)?.[0]),
+        upc: null,
         packageSize: clean(text.match(/\b\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|fl oz|ct|count|pack|pk|lb|lbs|gallon|gal|qt)\b(?:\s*[xX]\s*\d+)?/i)?.[0]),
-        productUrl: url,
+        currentPrice: prices[0] ?? null,
+        originalPrice: prices[1] ?? null,
+        discount: clean(text.match(/(?:save\s*\$?\d+(?:\.\d{2})?|\d+%\s*off|clearance|wow deal)/i)?.[0]),
+        coupon: clean(text.match(/(?:coupon|clip|instant savings|save \$?\d+)[^.]{0,120}/i)?.[0]),
+        availability: clean(text.match(/(?:in stock|out of stock|available|pickup|delivery|shipping|same-day delivery)[^.]{0,80}/i)?.[0]),
+        quantityLimit: clean(text.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]),
+        productUrl,
         imageUrl: absUrl(image?.currentSrc || image?.getAttribute('src')),
-        coupons: clean(text.match(/(?:coupon|clip|instant savings|save \$?\d+)[^.]{0,120}/i)?.[0]),
-        quantityLimits: clean(text.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0])
+        amazonProfitCheck: {
+          status: 'pending',
+          lookupKeys: { upc: null, sku: null, brand: null, productName, packageSize: null }
+        }
       };
     }).filter(Boolean);
-  });
+  }, { dealSourceName: dealSource.name });
 }
 
 async function enrichProductFromPage(page, listingProduct, index) {
-  await gotoAndCheck(page, listingProduct.productUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 }, `clearance-product-${index + 1}`);
+  await gotoAndCheck(page, listingProduct.productUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 }, `${listingProduct.dealSource}-product-${index + 1}`);
   await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
-  await failIfAccessDenied(page, `clearance-product-${index + 1}`);
-  const screenshotPath = await saveStep(page, `05-clearance-product-${String(index + 1).padStart(2, '0')}`);
+  await failIfAccessDenied(page, `${listingProduct.dealSource}-product-${index + 1}`);
+  const screenshotPath = await saveStep(page, `05-${listingProduct.dealSource}-product-${String(index + 1).padStart(2, '0')}`);
 
   const details = await page.evaluate(() => {
     const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
@@ -297,66 +304,117 @@ async function enrichProductFromPage(page, listingProduct, index) {
       if (!value) return null;
       try { return new URL(value, location.href).toString(); } catch { return null; }
     };
+    const productName = clean(productJson.name) || clean(document.querySelector('h1, [data-testid*="product-name" i]')?.textContent);
+    const packageSize = clean(bodyText.match(/\b\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|fl oz|ct|count|pack|pk|lb|lbs|gallon|gal|qt)\b(?:\s*[xX]\s*\d+)?/i)?.[0]);
+    const sku = clean(productJson.sku) || clean(bodyText.match(/(?:SKU|Item|Item #|Model)\s*[:#-]?\s*([A-Z0-9-]{3,})/i)?.[1]);
+    const upc = clean(productJson.gtin12 || productJson.gtin13 || productJson.gtin14 || productJson.gtin) || clean(bodyText.match(/(?:UPC|GTIN)\s*[:#-]?\s*([0-9-]{8,14})/i)?.[1]);
+    const brand = clean(typeof productJson.brand === 'string' ? productJson.brand : productJson.brand?.name) || clean(bodyText.match(/(?:Brand)\s*[:#-]?\s*([A-Za-z0-9 '&.-]{2,60})/i)?.[1]);
     return {
-      name: clean(productJson.name) || clean(document.querySelector('h1, [data-testid*="product-name" i]')?.textContent),
-      sku: clean(productJson.sku) || clean(bodyText.match(/(?:SKU|Item|Item #|Model)\s*[:#-]?\s*([A-Z0-9-]{3,})/i)?.[1]),
-      price: offer?.price ? String(offer.price) : prices[0] ?? null,
+      productName,
+      brand,
+      sku,
+      upc,
+      packageSize,
+      currentPrice: offer?.price ? String(offer.price) : prices[0] ?? null,
       originalPrice: prices[1] ?? null,
-      discount: clean(bodyText.match(/(?:save\s*\$?\d+(?:\.\d{2})?|\d+%\s*off|clearance)/i)?.[0]),
+      discount: clean(bodyText.match(/(?:save\s*\$?\d+(?:\.\d{2})?|\d+%\s*off|clearance|wow deal)/i)?.[0]),
+      coupon: clean(bodyText.match(/(?:coupon|clip|instant savings|save \$?\d+)[^.]{0,120}/i)?.[0]),
       availability: clean(offer?.availability) || clean(bodyText.match(/(?:in stock|out of stock|available|pickup|delivery|shipping|same-day delivery)[^.]{0,100}/i)?.[0]),
-      packageSize: clean(bodyText.match(/\b\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|fl oz|ct|count|pack|pk|lb|lbs|gallon|gal|qt)\b(?:\s*[xX]\s*\d+)?/i)?.[0]),
+      quantityLimit: clean(bodyText.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]),
       productUrl: location.href,
       imageUrl: absUrl(Array.isArray(productJson.image) ? productJson.image[0] : productJson.image) || absUrl(image?.currentSrc || image?.getAttribute('src')),
-      coupons: clean(bodyText.match(/(?:coupon|clip|instant savings|save \$?\d+)[^.]{0,120}/i)?.[0]),
-      quantityLimits: clean(bodyText.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0])
+      amazonProfitCheck: {
+        status: 'pending',
+        lookupKeys: { upc, sku, brand, productName, packageSize }
+      }
     };
   });
 
   return { ...listingProduct, ...Object.fromEntries(Object.entries(details).filter(([, value]) => value)), screenshotPath };
 }
 
-test.describe("BJ's clearance discovery automation", () => {
-  test('discovers and scrapes BJ\'s clearance product listings without cart or checkout actions', async ({ page }) => {
+function buildShoppingListReport(products) {
+  return products.map((product) => ({
+    recommendedStore: product.supplier,
+    product: product.productName,
+    price: product.currentPrice,
+    dealSource: product.dealSource,
+    url: product.productUrl,
+    notes: [
+      product.brand && `Brand: ${product.brand}`,
+      product.sku && `SKU/item: ${product.sku}`,
+      product.upc && `UPC: ${product.upc}`,
+      product.packageSize && `Package: ${product.packageSize}`,
+      product.originalPrice && `Original: ${product.originalPrice}`,
+      product.discount && `Discount: ${product.discount}`,
+      product.coupon && `Coupon: ${product.coupon}`,
+      product.availability && `Availability: ${product.availability}`,
+      product.quantityLimit && `Limit: ${product.quantityLimit}`,
+      'Amazon profit check: pending'
+    ].filter(Boolean).join(' | ')
+  }));
+}
+
+test.describe("BJ's store shopping list intelligence", () => {
+  test('scrapes Clearance and Wow Deals data only, without cart or checkout actions', async ({ page }) => {
     const consoleMessages = [];
     page.on('console', (message) => consoleMessages.push({ type: message.type(), text: message.text() }));
     page.on('pageerror', (error) => consoleMessages.push({ type: 'pageerror', text: error.message }));
 
     const auth = await ensureAuthenticated(page);
-    const discoveredClearanceUrl = await navigateToClearance(page);
-    const listingScreenshots = [];
-    for (let i = 0; i < maxListingScreenshots; i += 1) {
-      listingScreenshots.push(await saveStep(page, `04-clearance-listing-page-${i + 1}`));
-      await page.mouse.wheel(0, 1400).catch(() => undefined);
-      await page.waitForTimeout(750);
-    }
-
-    const listingProducts = await extractListingProducts(page);
-    if (listingProducts.length === 0) {
-      const screenshotPath = await saveStep(page, 'clearance-page-no-scrapable-products');
-      throw new Error(`BJ's Clearance navigation reached ${page.url()}, but no scrapable product tiles were found. Screenshot saved to ${screenshotPath}.`);
-    }
-
+    const sourceReports = [];
     const products = [];
-    for (const [index, product] of listingProducts.slice(0, maxProductPages).entries()) {
-      products.push(await enrichProductFromPage(page, product, index));
-    }
-    for (const product of listingProducts.slice(maxProductPages)) {
-      products.push(product);
+
+    for (const dealSource of dealSources) {
+      const discoveredUrl = await navigateToDealSource(page, dealSource);
+      const listingScreenshots = [];
+      for (let i = 0; i < maxListingScreenshots; i += 1) {
+        listingScreenshots.push(await saveStep(page, `04-${dealSource.name}-listing-page-${i + 1}`));
+        await page.mouse.wheel(0, 1400).catch(() => undefined);
+        await page.waitForTimeout(750);
+      }
+
+      const listingProducts = await extractListingProducts(page, dealSource);
+      if (listingProducts.length === 0) {
+        const screenshotPath = await saveStep(page, `${dealSource.name}-page-no-scrapable-products`);
+        throw new Error(`BJ's ${dealSource.name} navigation reached ${page.url()}, but no scrapable product tiles were found. Screenshot saved to ${screenshotPath}.`);
+      }
+
+      const sourceProducts = [];
+      for (const [index, product] of listingProducts.slice(0, maxProductPagesPerDealSource).entries()) {
+        sourceProducts.push(await enrichProductFromPage(page, product, index));
+      }
+      sourceProducts.push(...listingProducts.slice(maxProductPagesPerDealSource));
+      products.push(...sourceProducts);
+      sourceReports.push({
+        dealSource: dealSource.name,
+        discoveredUrl,
+        productCount: sourceProducts.length,
+        enrichedProductCount: Math.min(listingProducts.length, maxProductPagesPerDealSource),
+        listingScreenshots
+      });
     }
 
-    await writeFile(path.join(logDir, 'clearance-products.json'), JSON.stringify(products, null, 2));
-    await writeFile(path.join(logDir, 'clearance-execution-report.json'), JSON.stringify({
+    const shoppingList = buildShoppingListReport(products);
+    await writeFile(path.join(logDir, 'deal-products.json'), JSON.stringify(products, null, 2));
+    await writeFile(path.join(logDir, 'shopping-list-report.json'), JSON.stringify(shoppingList, null, 2));
+    await writeFile(path.join(logDir, 'deal-execution-report.json'), JSON.stringify({
       auth,
-      discoveredClearanceUrl,
+      sourceReports,
       productCount: products.length,
-      enrichedProductCount: Math.min(listingProducts.length, maxProductPages),
-      maxProductPages,
-      stoppedBeforeCart: true,
-      stoppedBeforeCheckout: true,
-      didNotAddToCart: true,
-      didNotPlaceOrder: true,
+      maxProductPagesPerDealSource,
+      outputs: {
+        dealProducts: path.join(logDir, 'deal-products.json'),
+        shoppingListReport: path.join(logDir, 'shopping-list-report.json')
+      },
+      businessRules: {
+        storeShoppingListOnly: true,
+        purchasesMadePhysicallyInStoreBy50TocWorker: true,
+        didNotAddToCart: true,
+        didNotCheckout: true,
+        didNotPlaceOrder: true
+      },
       screenshotsDirectory: screenshotDir,
-      listingScreenshots,
       logsDirectory: logDir,
       consoleMessages,
       completedAt: new Date().toISOString()
