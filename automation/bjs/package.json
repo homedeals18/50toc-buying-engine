@@ -7,7 +7,9 @@
     "test": "playwright test",
     "test:blue-diamond": "playwright test tests/blue-diamond-almonds.spec.js --project=chromium",
     "test:blue-diamond:headed": "BJS_HEADLESS=false playwright test tests/blue-diamond-almonds.spec.js --project=chromium --headed",
-    "test:blue-diamond:manual-chrome": "node ./run-blue-diamond-manual-chrome.js"
+    "test:blue-diamond:manual-chrome": "node ./run-blue-diamond-manual-chrome.js",
+    "scrape:clearance": "playwright test tests/clearance-discovery.spec.js --project=chromium",
+    "scrape:clearance:manual-chrome": "node ./run-clearance-manual-chrome.js"
   },
   "devDependencies": {
     "@playwright/test": "latest",
