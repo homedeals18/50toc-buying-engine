@@ -1,6 +1,7 @@
 {
   "private": true,
   "scripts": {
-    "test:blue-diamond:headed": "npm --prefix automation/bjs run test:blue-diamond:headed"
+    "test:blue-diamond:headed": "npm --prefix automation/bjs run test:blue-diamond:headed",
+    "test:blue-diamond:manual-chrome": "npm --prefix automation/bjs run test:blue-diamond:manual-chrome"
   }
 }
