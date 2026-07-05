@@ -6,6 +6,8 @@ const artifactRoot = path.resolve(process.cwd(), '../../artifacts/bjs');
 const screenshotDir = path.join(artifactRoot, 'screenshots');
 const logDir = path.join(artifactRoot, 'logs');
 const profileDir = path.join(artifactRoot, 'profile');
+const manualChromeEndpoint = process.env.BJS_CHROME_CDP_ENDPOINT ?? 'http://127.0.0.1:9222';
+const browserMode = process.env.BJS_BROWSER_MODE ?? 'playwright';
 const searchTerm = 'Blue Diamond Almonds 0.75 oz';
 const manualLoginTimeout = Number(process.env.BJS_MANUAL_LOGIN_TIMEOUT_MS ?? 10 * 60_000);
 
@@ -29,8 +31,12 @@ ${body}`)) {
   }
 }
 
+function bjsUrl(pathname = '/') {
+  return new URL(pathname, 'https://www.bjs.com').toString();
+}
+
 async function gotoAndCheck(page, url, options = {}, label = String(url)) {
-  const response = await page.goto(url, options);
+  const response = await page.goto(bjsUrl(url), options);
   await failIfAccessDenied(page, label);
   return response;
 }
@@ -38,6 +44,23 @@ async function gotoAndCheck(page, url, options = {}, label = String(url)) {
 const test = base.extend({
   context: async ({}, use) => {
     await ensureArtifactDirs();
+
+    if (browserMode === 'manual-chrome') {
+      let browser;
+      try {
+        browser = await chromium.connectOverCDP(manualChromeEndpoint);
+      } catch (error) {
+        throw new Error(`Unable to connect to manual Chrome at ${manualChromeEndpoint}. Start regular Chrome with --remote-debugging-port=9222 and a dedicated profile folder before running this mode. Original error: ${error.message}`);
+      }
+      const context = browser.contexts()[0] ?? await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+      try {
+        await use(context);
+      } finally {
+        await browser.close();
+      }
+      return;
+    }
+
     const context = await chromium.launchPersistentContext(profileDir, {
       baseURL: 'https://www.bjs.com',
       headless: false,
@@ -127,7 +150,7 @@ async function ensureAuthenticated(page) {
   await saveStep(page, '01-bjs-homepage-before-auth-check');
 
   if (await isAuthenticated(page)) {
-    return { authenticated: true, profileDir, loginMode: 'reused-persistent-profile' };
+    return { authenticated: true, profileDir: browserMode === 'manual-chrome' ? 'manual-chrome-existing-profile' : profileDir, loginMode: browserMode === 'manual-chrome' ? 'manual-chrome-existing-session' : 'reused-persistent-profile' };
   }
 
   const signIn = page.locator('a:has-text("Sign In"), button:has-text("Sign In"), text=/sign\\s*in|log\\s*in/i').first();
@@ -140,7 +163,7 @@ async function ensureAuthenticated(page) {
   await page.waitForFunction(() => /sign\s*out|log\s*out|my\s+account|membership|account/i.test(document.body.innerText), null, { timeout: manualLoginTimeout });
   await failIfAccessDenied(page, 'post-login');
   await saveStep(page, '03-bjs-login-complete');
-  return { authenticated: true, profileDir, loginMode: 'manual-login-saved-to-persistent-profile' };
+  return { authenticated: true, profileDir: browserMode === 'manual-chrome' ? 'manual-chrome-existing-profile' : profileDir, loginMode: browserMode === 'manual-chrome' ? 'manual-login-in-existing-chrome-session' : 'manual-login-saved-to-persistent-profile' };
 }
 
 async function searchForProduct(page) {
@@ -230,7 +253,9 @@ test.describe("BJ's product cart automation", () => {
     expect(`${product.name} ${product.packageSize ?? ''}`, 'Expected first product to match Blue Diamond Almonds 0.75 oz').toMatch(/blue\s+diamond|almond|0\.75\s*oz/i);
 
     await addOneToCart(page);
+    await failIfAccessDenied(page, 'after-add-to-cart');
     await verifyCartContainsItem(page, product.name);
+    await failIfAccessDenied(page, 'before-checkout-stop');
 
     const report = {
       searchTerm,
