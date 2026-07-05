@@ -96,25 +96,25 @@ The test waits up to 10 minutes by default for manual login. Override this with 
 
 ### BJ's manual Chrome mode
 
-Use manual Chrome mode when you want the BJ's workflow to reuse a regular Chrome window that you opened yourself. Start Chrome with remote debugging enabled and a dedicated profile folder, sign in to BJ's in that window if needed, and then run the manual Chrome script.
+Use manual Chrome mode when you want the BJ's workflow to reuse a regular Chrome window. The launcher starts regular Google Chrome with remote debugging enabled, waits for Chrome to expose the debugging endpoint, and then runs the Blue Diamond Almonds Playwright test against that Chrome session. Sign in to BJ's in the launched Chrome window if prompted.
 
-Windows PowerShell example:
-
-```powershell
-$profile = "$env:USERPROFILE\bjs-manual-chrome-profile"
-& "$env:ProgramFiles\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="$profile" https://www.bjs.com
-```
-
-If Chrome is installed in the 32-bit Program Files location, use this path instead:
-
-```powershell
-& "$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="$profile" https://www.bjs.com
-```
-
-Leave that Chrome window open, then run from the repository root:
+Run from the repository root:
 
 ```bash
 npm run test:blue-diamond:manual-chrome
 ```
 
-The manual script connects to `http://127.0.0.1:9222` by default. Override it with `BJS_CHROME_CDP_ENDPOINT` if you use a different host or port. The normal Playwright launch mode remains available as the fallback with `npm run test:blue-diamond:headed` or `./scripts/run-bjs-blue-diamond-test.sh`.
+On Windows, the launcher uses `child_process.spawn` directly with the Chrome executable path. It checks the default 64-bit Chrome install first and then the 32-bit and per-user installs:
+
+- `%ProgramFiles%\Google\Chrome\Application\chrome.exe`
+- `%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe`
+- `%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe`
+
+If Chrome is installed somewhere else, set `BJS_CHROME_PATH` in PowerShell before running the test:
+
+```powershell
+$env:BJS_CHROME_PATH = "D:\Apps\Google\Chrome\Application\chrome.exe"
+npm run test:blue-diamond:manual-chrome
+```
+
+The launcher stores the dedicated manual Chrome profile under `artifacts/bjs/manual-chrome-profile` by default. Override it with `BJS_MANUAL_CHROME_PROFILE_DIR` if you want to reuse a different profile folder. The manual script connects to `http://127.0.0.1:9222` by default; override it with `BJS_CHROME_CDP_ENDPOINT` if you use a different host or port. To connect to a Chrome instance that you already started yourself, set `BJS_SKIP_CHROME_LAUNCH=true` and make sure that Chrome was started with a matching `--remote-debugging-port`. The normal Playwright launch mode remains available as the fallback with `npm run test:blue-diamond:headed` or `./scripts/run-bjs-blue-diamond-test.sh`.
