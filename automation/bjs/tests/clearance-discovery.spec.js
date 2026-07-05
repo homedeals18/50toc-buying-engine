@@ -140,27 +140,93 @@ async function ensureAuthenticated(page) {
   return { authenticated: true, profileDir: browserMode === 'manual-chrome' ? 'manual-chrome-existing-profile' : profileDir, loginMode: browserMode === 'manual-chrome' ? 'manual-login-in-existing-chrome-session' : 'manual-login-saved-to-persistent-profile' };
 }
 
+async function clickAndWaitForNavigation(page, locator, label) {
+  await Promise.all([
+    page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => undefined),
+    locator.click({ timeout: 10_000 })
+  ]);
+  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+  await failIfAccessDenied(page, label);
+}
+
+async function searchSiteForClearance(page) {
+  const searchSelectors = [
+    'input[type="search"]',
+    'input[placeholder*="search" i]',
+    'input[aria-label*="search" i]',
+    '[data-testid*="search" i] input',
+    'form[role="search"] input'
+  ];
+  for (const selector of searchSelectors) {
+    const searchBox = page.locator(selector).first();
+    if (await searchBox.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await searchBox.fill('clearance');
+      await Promise.all([
+        page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => undefined),
+        searchBox.press('Enter')
+      ]);
+      await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+      await failIfAccessDenied(page, 'clearance-search-results');
+      return true;
+    }
+  }
+  return false;
+}
+
 async function navigateToClearance(page) {
   await gotoAndCheck(page, '/', { waitUntil: 'domcontentloaded', timeout: 60_000 }, 'homepage-clearance');
   await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
   await clickCookieOrModalDismissers(page);
 
-  const clearanceLink = page.locator('a:has-text("Clearance"), button:has-text("Clearance")').first();
-  if (await clearanceLink.isVisible({ timeout: 8_000 }).catch(() => false)) {
-    await Promise.all([page.waitForLoadState('domcontentloaded').catch(() => undefined), clearanceLink.click()]);
+  const directClearanceLink = page.locator('a:has-text("Clearance"), button:has-text("Clearance")').first();
+  if (await directClearanceLink.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await clickAndWaitForNavigation(page, directClearanceLink, 'clearance-link');
   } else {
-    for (const candidate of ['/c/clearance', '/deals-and-coupons/clearance', '/clearance', '/search?searchTerm=clearance']) {
-      const response = await gotoAndCheck(page, candidate, { waitUntil: 'domcontentloaded', timeout: 60_000 }, `clearance-${candidate}`);
-      await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
-      const body = await page.locator('body').innerText({ timeout: 8_000 }).catch(() => '');
-      const hasProducts = await productCardLocators(page).first().isVisible({ timeout: 3_000 }).catch(() => false);
-      if ((response?.ok() || response?.status() === 304) && (/clearance/i.test(`${page.url()} ${body}`) || hasProducts)) break;
+    const menuTriggers = [
+      'button:has-text("Shop")',
+      'a:has-text("Shop")',
+      'button:has-text("Categories")',
+      'a:has-text("Categories")',
+      'button[aria-label*="menu" i]',
+      'button[aria-label*="shop" i]',
+      'button[aria-label*="categories" i]'
+    ];
+    for (const selector of menuTriggers) {
+      const trigger = page.locator(selector).first();
+      if (await trigger.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await trigger.click({ timeout: 5_000 }).catch(() => undefined);
+        await page.waitForTimeout(1_000);
+        const nestedClearanceLink = page.locator('a:has-text("Clearance"), button:has-text("Clearance")').first();
+        if (await nestedClearanceLink.isVisible({ timeout: 3_000 }).catch(() => false)) {
+          await clickAndWaitForNavigation(page, nestedClearanceLink, 'clearance-menu-link');
+          break;
+        }
+      }
     }
+  }
+
+  if (!/clearance/i.test(page.url())) {
+    const searched = await searchSiteForClearance(page);
+    if (!searched) {
+      const screenshotPath = await saveStep(page, 'clearance-navigation-failed-no-search');
+      throw new Error(`Unable to locate BJ's Clearance through homepage navigation or site search controls. Reached ${page.url()}. Screenshot saved to ${screenshotPath}.`);
+    }
+  }
+
+  const searchResultClearanceLink = page.locator('a:has-text("Clearance"), button:has-text("Clearance")').first();
+  if (!/clearance/i.test(page.url()) && await searchResultClearanceLink.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await clickAndWaitForNavigation(page, searchResultClearanceLink, 'clearance-search-result-link');
   }
 
   await page.waitForLoadState('networkidle', { timeout: 25_000 }).catch(() => undefined);
   await failIfAccessDenied(page, 'clearance-page');
-  await saveStep(page, '04-clearance-page');
+  const hasProductTiles = await productCardLocators(page).first().isVisible({ timeout: 10_000 }).catch(() => false);
+  const screenshotPath = await saveStep(page, hasProductTiles ? '04-clearance-page' : '04-clearance-page-no-products', { hasProductTiles });
+  if (!hasProductTiles) {
+    throw new Error(`BJ's Clearance navigation reached ${page.url()}, but no product tiles were visible. Screenshot saved to ${screenshotPath}.`);
+  }
+  await writeFile(path.join(logDir, 'clearance-url.txt'), `${page.url()}\n`);
+  return page.url();
 }
 
 function productCardLocators(page) {
@@ -256,7 +322,7 @@ test.describe("BJ's clearance discovery automation", () => {
     page.on('pageerror', (error) => consoleMessages.push({ type: 'pageerror', text: error.message }));
 
     const auth = await ensureAuthenticated(page);
-    await navigateToClearance(page);
+    const discoveredClearanceUrl = await navigateToClearance(page);
     const listingScreenshots = [];
     for (let i = 0; i < maxListingScreenshots; i += 1) {
       listingScreenshots.push(await saveStep(page, `04-clearance-listing-page-${i + 1}`));
@@ -265,7 +331,10 @@ test.describe("BJ's clearance discovery automation", () => {
     }
 
     const listingProducts = await extractListingProducts(page);
-    expect(listingProducts.length, 'Expected BJ\'s clearance page to expose product listings').toBeGreaterThan(0);
+    if (listingProducts.length === 0) {
+      const screenshotPath = await saveStep(page, 'clearance-page-no-scrapable-products');
+      throw new Error(`BJ's Clearance navigation reached ${page.url()}, but no scrapable product tiles were found. Screenshot saved to ${screenshotPath}.`);
+    }
 
     const products = [];
     for (const [index, product] of listingProducts.slice(0, maxProductPages).entries()) {
@@ -278,6 +347,7 @@ test.describe("BJ's clearance discovery automation", () => {
     await writeFile(path.join(logDir, 'clearance-products.json'), JSON.stringify(products, null, 2));
     await writeFile(path.join(logDir, 'clearance-execution-report.json'), JSON.stringify({
       auth,
+      discoveredClearanceUrl,
       productCount: products.length,
       enrichedProductCount: Math.min(listingProducts.length, maxProductPages),
       maxProductPages,
