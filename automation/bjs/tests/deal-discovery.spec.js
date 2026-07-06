@@ -10,11 +10,14 @@ const manualChromeEndpoint = process.env.BJS_CHROME_CDP_ENDPOINT ?? 'http://127.
 const browserMode = process.env.BJS_BROWSER_MODE ?? 'playwright';
 const manualLoginTimeout = Number(process.env.BJS_MANUAL_LOGIN_TIMEOUT_MS ?? 10 * 60_000);
 const maxListingScreenshots = Number(process.env.BJS_DEALS_MAX_LISTING_SCREENSHOTS ?? 2);
-const maxProductPagesPerDealSource = Number(process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 12);
 const dealSources = [
-  { name: 'Clearance', searchTerm: 'clearance' },
-  { name: 'Wow Deals', searchTerm: 'wow deals' }
+  { name: 'Clearance', searchTerm: 'clearance', maxProducts: Number(process.env.BJS_MAX_CLEARANCE_PRODUCTS ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 12) },
+  { name: 'Wow Deals', searchTerm: 'wow deals', maxProducts: Number(process.env.BJS_MAX_WOW_DEALS_PRODUCTS ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 12) }
 ];
+const relevantCategoryPatterns = [/grocery/i, /health\s*&\s*beauty/i, /health\s*&\s*household/i];
+const unrelatedDepartmentPattern = /furniture|patio|garden|outdoor|appliance|electronics?|toys?|clothing|apparel|automotive|seasonal|lawn|grill|sporting goods|jewelry|office|books?|mattress|tires?/i;
+const dealProductsPath = path.join(logDir, 'deal-products.json');
+const shoppingListReportPath = path.join(logDir, 'shopping-list-report.json');
 
 async function ensureArtifactDirs() {
   await Promise.all([
@@ -158,13 +161,12 @@ const bjsProductLinkSelector = 'a[href*="/product/"]';
 // BJ's category/search pages currently render product tiles as generic grid divs,
 // not the older product-card/productTile/product-tile class names. The stable
 // signals observed on the current DOM are product detail anchors
-// (`a[href*="/product/"]`) inside grid/list tile containers with add-to-cart,
+// (`a[href*="/product/"]`) inside grid/list tile containers with
 // price, image, pickup/delivery/shipping, and rating text. Keep the legacy
 // class/data-testid selectors below as fallbacks, but discover products from
 // product links first so generic div-based tiles are not missed.
 const bjsProductTileSelector = [
   'div:has(> a[href*="/product/"])',
-  'div:has(a[href*="/product/"]):has(button:has-text("ADD"))',
   '[data-testid*="product" i]:has(a[href*="/product/"])',
   '[class*="product-card" i]:has(a[href*="/product/"])',
   '[class*="productTile" i]:has(a[href*="/product/"])',
@@ -271,6 +273,43 @@ async function navigateToDealSource(page, dealSource) {
   return page.url();
 }
 
+function categoryAllowed(product) {
+  const category = product.category;
+  if (!category) return true;
+  return relevantCategoryPatterns.some((pattern) => pattern.test(category)) && !unrelatedDepartmentPattern.test(category);
+}
+
+
+function unifiedDeal(product) {
+  const scanDate = product.scanDate ?? new Date().toISOString();
+  return {
+    supplier: product.supplier ?? "BJ's Wholesale Club",
+    dealSource: product.dealSource ?? null,
+    category: product.category ?? null,
+    productName: product.productName ?? null,
+    brand: product.brand ?? null,
+    sku: product.sku ?? null,
+    upc: product.upc ?? null,
+    packageSize: product.packageSize ?? null,
+    currentPrice: product.currentPrice ?? null,
+    originalPrice: product.originalPrice ?? null,
+    discount: product.discount ?? null,
+    coupon: product.coupon ?? null,
+    availability: product.availability ?? null,
+    quantityLimit: product.quantityLimit ?? null,
+    productUrl: product.productUrl ?? null,
+    imageUrl: product.imageUrl ?? null,
+    scanDate
+  };
+}
+
+async function saveProgress(products) {
+  await ensureArtifactDirs();
+  const unifiedProducts = products.map(unifiedDeal).filter(categoryAllowed);
+  await writeFile(dealProductsPath, JSON.stringify(unifiedProducts, null, 2));
+  await writeFile(shoppingListReportPath, JSON.stringify(buildShoppingListReport(unifiedProducts), null, 2));
+}
+
 async function extractListingProducts(page, dealSource) {
   await loadMoreProductsIfAvailable(page);
   await page.mouse.wheel(0, 1800).catch(() => undefined);
@@ -278,7 +317,9 @@ async function extractListingProducts(page, dealSource) {
   await page.mouse.wheel(0, 1800).catch(() => undefined);
   await page.waitForTimeout(1_000);
 
-  return page.evaluate(({ dealSourceName, productLinkSelector }) => {
+  return page.evaluate(({ dealSourceName, productLinkSelector, relevantCategorySources, unrelatedDepartmentSource }) => {
+    const relevantCategoryPatterns = relevantCategorySources.map((source) => new RegExp(source, 'i'));
+    const unrelatedDepartmentPattern = new RegExp(unrelatedDepartmentSource, 'i');
     const absUrl = (value) => {
       if (!value) return null;
       try { return new URL(value, location.href).toString(); } catch { return null; }
@@ -289,9 +330,22 @@ async function extractListingProducts(page, dealSource) {
       let node = link;
       for (let depth = 0; node && depth < 8; depth += 1, node = node.parentElement) {
         const text = node.textContent || '';
-        if (/\$|ADD|Pickup|Delivery|Shipping|clearance|wow|save|off|coupon|available|stock/i.test(text) && node.querySelector('img')) return node;
+        if (/\$|Pickup|Delivery|Shipping|clearance|wow|save|off|coupon|available|stock/i.test(text) && node.querySelector('img')) return node;
       }
       return link.closest('[data-testid*="product" i], [class*="product-card" i], [class*="productTile" i], [class*="product-tile" i], li, article, div') || link;
+    };
+    const categoryFrom = (card) => {
+      const categoryText = clean(
+        card.closest('[data-category], [data-department]')?.getAttribute('data-category') ||
+        card.closest('[data-category], [data-department]')?.getAttribute('data-department') ||
+        document.querySelector('[aria-label*="breadcrumb" i], nav[aria-label*="breadcrumb" i]')?.textContent ||
+        [...document.querySelectorAll('a, button, [aria-checked="true"], [aria-selected="true"]')]
+          .map((node) => node.textContent)
+          .find((text) => relevantCategoryPatterns.some((pattern) => pattern.test(text || '')) || unrelatedDepartmentPattern.test(text || ''))
+      );
+      if (!categoryText) return null;
+      if (unrelatedDepartmentPattern.test(categoryText)) return categoryText;
+      return relevantCategoryPatterns.some((pattern) => pattern.test(categoryText)) ? categoryText : null;
     };
     const productLinks = [...document.querySelectorAll(productLinkSelector)]
       .filter((link) => link.offsetParent !== null && clean(link.textContent || link.getAttribute('aria-label') || link.querySelector('img')?.getAttribute('alt')));
@@ -303,12 +357,15 @@ async function extractListingProducts(page, dealSource) {
       if (!productUrl || seen.has(productUrl)) return null;
       seen.add(productUrl);
       const text = clean(card.textContent) || '';
+      const category = categoryFrom(card);
+      if (category && (unrelatedDepartmentPattern.test(category) || !relevantCategoryPatterns.some((pattern) => pattern.test(category)))) return null;
       const prices = priceMatches(text);
       const image = card.querySelector('img');
       const productName = clean(card.querySelector('[data-testid*="name" i], [class*="name" i], h2, h3, a[href*="/product"], a[href*="/p/"]')?.textContent) || clean(image?.getAttribute('alt'));
       return {
         supplier: "BJ's Wholesale Club",
         dealSource: dealSourceName,
+        category,
         productName,
         brand: null,
         sku: clean(text.match(/(?:SKU|Item|Item #|Model)\s*[:#-]?\s*([A-Z0-9-]{3,})/i)?.[1]),
@@ -322,13 +379,15 @@ async function extractListingProducts(page, dealSource) {
         quantityLimit: clean(text.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]),
         productUrl,
         imageUrl: absUrl(image?.currentSrc || image?.getAttribute('src')),
-        amazonProfitCheck: {
-          status: 'pending',
-          lookupKeys: { upc: null, sku: null, brand: null, productName, packageSize: null }
-        }
+        scanDate: new Date().toISOString()
       };
     }).filter(Boolean);
-  }, { dealSourceName: dealSource.name, productLinkSelector: bjsProductLinkSelector });
+  }, {
+    dealSourceName: dealSource.name,
+    productLinkSelector: bjsProductLinkSelector,
+    relevantCategorySources: relevantCategoryPatterns.map((pattern) => pattern.source),
+    unrelatedDepartmentSource: unrelatedDepartmentPattern.source
+  });
 }
 
 async function enrichProductFromPage(page, listingProduct, index) {
@@ -356,11 +415,14 @@ async function enrichProductFromPage(page, listingProduct, index) {
     const sku = clean(productJson.sku) || clean(bodyText.match(/(?:SKU|Item|Item #|Model)\s*[:#-]?\s*([A-Z0-9-]{3,})/i)?.[1]);
     const upc = clean(productJson.gtin12 || productJson.gtin13 || productJson.gtin14 || productJson.gtin) || clean(bodyText.match(/(?:UPC|GTIN)\s*[:#-]?\s*([0-9-]{8,14})/i)?.[1]);
     const brand = clean(typeof productJson.brand === 'string' ? productJson.brand : productJson.brand?.name) || clean(bodyText.match(/(?:Brand)\s*[:#-]?\s*([A-Za-z0-9 '&.-]{2,60})/i)?.[1]);
+    const breadcrumbCategory = clean(document.querySelector('[aria-label*="breadcrumb" i], nav[aria-label*="breadcrumb" i]')?.textContent);
+    const category = breadcrumbCategory && (/furniture|patio|garden|outdoor|appliance|electronics?|toys?|clothing|apparel|automotive|seasonal|lawn|grill|sporting goods|jewelry|office|books?|mattress|tires?/i.test(breadcrumbCategory) || /grocery|health\s*&\s*beauty|health\s*&\s*household/i.test(breadcrumbCategory)) ? breadcrumbCategory : null;
     return {
       productName,
       brand,
       sku,
       upc,
+      category,
       packageSize,
       currentPrice: offer?.price ? String(offer.price) : prices[0] ?? null,
       originalPrice: prices[1] ?? null,
@@ -370,14 +432,11 @@ async function enrichProductFromPage(page, listingProduct, index) {
       quantityLimit: clean(bodyText.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]),
       productUrl: location.href,
       imageUrl: absUrl(Array.isArray(productJson.image) ? productJson.image[0] : productJson.image) || absUrl(image?.currentSrc || image?.getAttribute('src')),
-      amazonProfitCheck: {
-        status: 'pending',
-        lookupKeys: { upc, sku, brand, productName, packageSize }
-      }
+      scanDate: new Date().toISOString()
     };
   });
 
-  return { ...listingProduct, ...Object.fromEntries(Object.entries(details).filter(([, value]) => value)), screenshotPath };
+  return unifiedDeal({ ...listingProduct, ...Object.fromEntries(Object.entries(details).filter(([, value]) => value)), screenshotPath });
 }
 
 function buildShoppingListReport(products) {
@@ -397,7 +456,7 @@ function buildShoppingListReport(products) {
       product.coupon && `Coupon: ${product.coupon}`,
       product.availability && `Availability: ${product.availability}`,
       product.quantityLimit && `Limit: ${product.quantityLimit}`,
-      'Amazon profit check: pending'
+      'Purchase in store by 50TOC worker'
     ].filter(Boolean).join(' | ')
   }));
 }
@@ -430,31 +489,36 @@ test.describe("BJ's store shopping list intelligence", () => {
       }
 
       const sourceProducts = [];
-      for (const [index, product] of listingProducts.slice(0, maxProductPagesPerDealSource).entries()) {
-        sourceProducts.push(await enrichProductFromPage(page, product, index));
+      const limitedListingProducts = listingProducts.slice(0, dealSource.maxProducts);
+      for (const [index, product] of limitedListingProducts.entries()) {
+        const enrichedProduct = await enrichProductFromPage(page, product, index);
+        if (categoryAllowed(enrichedProduct)) {
+          sourceProducts.push(enrichedProduct);
+          products.push(enrichedProduct);
+          await saveProgress(products);
+        } else {
+          console.log(`BJ's ${dealSource.name}: skipped unrelated category "${enrichedProduct.category}" for ${enrichedProduct.productName ?? enrichedProduct.productUrl}.`);
+        }
       }
-      sourceProducts.push(...listingProducts.slice(maxProductPagesPerDealSource));
-      products.push(...sourceProducts);
       sourceReports.push({
         dealSource: dealSource.name,
         discoveredUrl,
         productCount: sourceProducts.length,
-        enrichedProductCount: Math.min(listingProducts.length, maxProductPagesPerDealSource),
+        scrapedProductLimit: dealSource.maxProducts,
+        skippedByLimitCount: Math.max(listingProducts.length - dealSource.maxProducts, 0),
         listingScreenshots
       });
     }
 
-    const shoppingList = buildShoppingListReport(products);
-    await writeFile(path.join(logDir, 'deal-products.json'), JSON.stringify(products, null, 2));
-    await writeFile(path.join(logDir, 'shopping-list-report.json'), JSON.stringify(shoppingList, null, 2));
+    await saveProgress(products);
     await writeFile(path.join(logDir, 'deal-execution-report.json'), JSON.stringify({
       auth,
       sourceReports,
       productCount: products.length,
-      maxProductPagesPerDealSource,
+      productLimits: Object.fromEntries(dealSources.map((source) => [source.name, source.maxProducts])),
       outputs: {
-        dealProducts: path.join(logDir, 'deal-products.json'),
-        shoppingListReport: path.join(logDir, 'shopping-list-report.json')
+        dealProducts: dealProductsPath,
+        shoppingListReport: shoppingListReportPath
       },
       businessRules: {
         storeShoppingListOnly: true,

@@ -6,7 +6,8 @@
   "scripts": {
     "test": "playwright test",
     "scrape:bjs:deals": "playwright test tests/deal-discovery.spec.js --project=chromium",
-    "scrape:bjs:deals:manual-chrome": "node ./run-bjs-deals-manual-chrome.js"
+    "scrape:bjs:deals:manual-chrome": "node ./run-bjs-deals-manual-chrome.js",
+    "scrape:bjs:deals:manual-chrome:direct": "node ./run-bjs-deals-manual-chrome.js"
   },
   "devDependencies": {
     "@playwright/test": "latest",

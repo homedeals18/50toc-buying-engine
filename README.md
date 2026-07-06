@@ -84,7 +84,13 @@ One-command Playwright run:
 ./scripts/run-bjs-deals-test.sh
 ```
 
-The setup script installs the BJ's automation Node dependencies, installs Chromium with Playwright's required system dependencies, and verifies that Chromium launches. The deal run collects product name, brand, SKU/item number, UPC when available, package size, current price, original price, discount, coupon, availability, quantity limit, product URL, and image URL. It writes `artifacts/bjs/logs/deal-products.json`, a shopping-list-ready `artifacts/bjs/logs/shopping-list-report.json`, and an execution report under `artifacts/bjs/logs/`.
+The setup script installs the BJ's automation Node dependencies, installs Chromium with Playwright's required system dependencies, and verifies that Chromium launches. The deal run collects only Clearance and Wow Deals products, keeps products in BJ's Grocery, Health & Beauty, and Health & Household categories when BJ's exposes category or filter data, and ignores unrelated departments such as furniture, patio, garden, outdoor, appliances, electronics, toys, clothing, automotive, and seasonal. It writes each product in the unified deal format (`supplier`, `dealSource`, `category`, `productName`, `brand`, `sku`, `upc`, `packageSize`, `currentPrice`, `originalPrice`, `discount`, `coupon`, `availability`, `quantityLimit`, `productUrl`, `imageUrl`, `scanDate`) to `artifacts/bjs/logs/deal-products.json`, writes a shopping-list-ready `artifacts/bjs/logs/shopping-list-report.json`, and saves progress after every scraped product so long runs can resume from the latest artifacts.
+
+Use testing limits when you want a short scrape:
+
+```bash
+BJS_MAX_CLEARANCE_PRODUCTS=5 BJS_MAX_WOW_DEALS_PRODUCTS=5 ./scripts/run-bjs-deals-test.sh
+```
 
 For first-time authentication, run headed so you can complete BJ's login manually. The test waits up to 10 minutes by default for manual login. Override this with `BJS_MANUAL_LOGIN_TIMEOUT_MS` if needed. After login succeeds, Playwright saves the persistent profile under `artifacts/bjs/profile` and future Playwright-mode runs reuse that session when BJ's still accepts it.
 
@@ -96,6 +102,12 @@ Run from the repository root:
 
 ```bash
 npm run scrape:bjs:deals:manual-chrome
+```
+
+If Windows reports a spawn `EINVAL` error through `npm`, use the direct Node launcher from the repository root. This bypasses `npx` and calls the local Playwright CLI with `process.execPath`:
+
+```powershell
+node automation/bjs/run-bjs-deals-manual-chrome.js
 ```
 
 On Windows, the launcher uses `child_process.spawn` directly with the Chrome executable path. It checks the default 64-bit Chrome install first and then the 32-bit and per-user installs:
