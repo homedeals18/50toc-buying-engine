@@ -153,8 +153,46 @@ async function clickAndWaitForNavigation(page, locator, label) {
   await failIfAccessDenied(page, label);
 }
 
+const bjsProductLinkSelector = 'a[href*="/product/"]';
+
+// BJ's category/search pages currently render product tiles as generic grid divs,
+// not the older product-card/productTile/product-tile class names. The stable
+// signals observed on the current DOM are product detail anchors
+// (`a[href*="/product/"]`) inside grid/list tile containers with add-to-cart,
+// price, image, pickup/delivery/shipping, and rating text. Keep the legacy
+// class/data-testid selectors below as fallbacks, but discover products from
+// product links first so generic div-based tiles are not missed.
+const bjsProductTileSelector = [
+  'div:has(> a[href*="/product/"])',
+  'div:has(a[href*="/product/"]):has(button:has-text("ADD"))',
+  '[data-testid*="product" i]:has(a[href*="/product/"])',
+  '[class*="product-card" i]:has(a[href*="/product/"])',
+  '[class*="productTile" i]:has(a[href*="/product/"])',
+  '[class*="product-tile" i]:has(a[href*="/product/"])',
+  'li:has(a[href*="/product/"])',
+  'article:has(a[href*="/product/"])'
+].join(', ');
+
 function productCardLocators(page) {
-  return page.locator('[data-testid*="product" i], [class*="product-card" i], [class*="productTile" i], [class*="product-tile" i], li:has(a[href*="/product"]), li:has(a[href*="/p/"]), article:has(a[href*="/product"]), article:has(a[href*="/p/"])');
+  return page.locator(bjsProductTileSelector);
+}
+
+async function expectedResultCount(page) {
+  const body = await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '');
+  return Number(body.match(/\((\d+)\s+Results\)|Showing\s+\d+\s+of\s+(\d+)\s+Results/i)?.slice(1).find(Boolean) ?? 0);
+}
+
+async function loadMoreProductsIfAvailable(page) {
+  const expected = await expectedResultCount(page);
+  for (let attempts = 0; attempts < 5; attempts += 1) {
+    const detected = await page.locator(bjsProductLinkSelector).evaluateAll((links) => new Set(links.map((link) => link.href).filter(Boolean)).size).catch(() => 0);
+    if (expected && detected >= expected) break;
+    const loadMore = page.locator('button:has-text("Load More"), a:has-text("Load More")').first();
+    if (!(await loadMore.isVisible({ timeout: 1_000 }).catch(() => false))) break;
+    await loadMore.click({ timeout: 5_000 }).catch(() => undefined);
+    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+    await page.waitForTimeout(1_000);
+  }
 }
 
 async function searchSiteForDealSource(page, dealSource) {
@@ -224,7 +262,7 @@ async function navigateToDealSource(page, dealSource) {
 
   await page.waitForLoadState('networkidle', { timeout: 25_000 }).catch(() => undefined);
   await failIfAccessDenied(page, `${dealSource.name}-page`);
-  const hasProductTiles = await productCardLocators(page).first().isVisible({ timeout: 10_000 }).catch(() => false);
+  const hasProductTiles = await page.locator(bjsProductLinkSelector).first().isVisible({ timeout: 10_000 }).catch(() => false);
   const screenshotPath = await saveStep(page, hasProductTiles ? `04-${dealSource.name}-page` : `04-${dealSource.name}-page-no-products`, { hasProductTiles });
   if (!hasProductTiles) {
     throw new Error(`BJ's ${dealSource.name} navigation reached ${page.url()}, but no product tiles were visible. Screenshot saved to ${screenshotPath}.`);
@@ -234,25 +272,34 @@ async function navigateToDealSource(page, dealSource) {
 }
 
 async function extractListingProducts(page, dealSource) {
+  await loadMoreProductsIfAvailable(page);
   await page.mouse.wheel(0, 1800).catch(() => undefined);
   await page.waitForTimeout(1_000);
   await page.mouse.wheel(0, 1800).catch(() => undefined);
   await page.waitForTimeout(1_000);
 
-  return page.evaluate(({ dealSourceName }) => {
+  return page.evaluate(({ dealSourceName, productLinkSelector }) => {
     const absUrl = (value) => {
       if (!value) return null;
       try { return new URL(value, location.href).toString(); } catch { return null; }
     };
     const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
     const priceMatches = (text) => [...text.matchAll(/\$\s*\d+(?:,\d{3})*(?:\.\d{2})?/g)].map((match) => match[0].replace(/\s+/g, ''));
-    const cardNodes = [...document.querySelectorAll('[data-testid*="product" i], [class*="product-card" i], [class*="productTile" i], [class*="product-tile" i], li, article')]
-      .filter((node) => node.querySelector('a[href*="/product"], a[href*="/p/"]') && /\$|clearance|wow|save|off|coupon|available|stock/i.test(node.textContent || ''));
+    const findTile = (link) => {
+      let node = link;
+      for (let depth = 0; node && depth < 8; depth += 1, node = node.parentElement) {
+        const text = node.textContent || '';
+        if (/\$|ADD|Pickup|Delivery|Shipping|clearance|wow|save|off|coupon|available|stock/i.test(text) && node.querySelector('img')) return node;
+      }
+      return link.closest('[data-testid*="product" i], [class*="product-card" i], [class*="productTile" i], [class*="product-tile" i], li, article, div') || link;
+    };
+    const productLinks = [...document.querySelectorAll(productLinkSelector)]
+      .filter((link) => link.offsetParent !== null && clean(link.textContent || link.getAttribute('aria-label') || link.querySelector('img')?.getAttribute('alt')));
 
     const seen = new Set();
-    return cardNodes.map((card) => {
-      const link = card.querySelector('a[href*="/product"], a[href*="/p/"]');
+    return productLinks.map((link) => {
       const productUrl = absUrl(link?.getAttribute('href'));
+      const card = findTile(link);
       if (!productUrl || seen.has(productUrl)) return null;
       seen.add(productUrl);
       const text = clean(card.textContent) || '';
@@ -281,7 +328,7 @@ async function extractListingProducts(page, dealSource) {
         }
       };
     }).filter(Boolean);
-  }, { dealSourceName: dealSource.name });
+  }, { dealSourceName: dealSource.name, productLinkSelector: bjsProductLinkSelector });
 }
 
 async function enrichProductFromPage(page, listingProduct, index) {
@@ -375,6 +422,8 @@ test.describe("BJ's store shopping list intelligence", () => {
       }
 
       const listingProducts = await extractListingProducts(page, dealSource);
+      const expectedProducts = await expectedResultCount(page);
+      console.log(`BJ's ${dealSource.name}: detected ${listingProducts.length} product tiles before opening product pages${expectedProducts ? ` (page reports ${expectedProducts} Results)` : ''}.`);
       if (listingProducts.length === 0) {
         const screenshotPath = await saveStep(page, `${dealSource.name}-page-no-scrapable-products`);
         throw new Error(`BJ's ${dealSource.name} navigation reached ${page.url()}, but no scrapable product tiles were found. Screenshot saved to ${screenshotPath}.`);
