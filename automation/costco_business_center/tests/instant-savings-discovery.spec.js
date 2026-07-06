@@ -105,13 +105,29 @@ async function clickCookieOrModalDismissers(page) {
   }
 }
 
+async function readDeliveryPageText(page) {
+  return page.locator('body').innerText({ timeout: 10_000 }).catch(() => '');
+}
+
+async function assertDeliveryZipConfirmed(page, mode) {
+  const body = await readDeliveryPageText(page);
+  if (body.includes(deliveryZipCode)) {
+    await saveStep(page, '03-after-zip-confirmation', { deliveryZipCode, mode, confirmed: true });
+    return { deliveryZipCode, accepted: true, mode, confirmedText: deliveryZipCode };
+  }
+
+  const screenshotPath = await saveStep(page, 'delivery-zip-not-confirmed', { deliveryZipCode, mode, bodyPreview: body.slice(0, 2_000) });
+  throw new Error(`Costco Business Center did not confirm delivery ZIP/location ${deliveryZipCode}; refusing to search Instant Savings. Screenshot saved to ${screenshotPath}.`);
+}
+
 async function ensureDeliveryZipCode(page) {
   await gotoAndCheck(page, '/', { waitUntil: 'domcontentloaded', timeout: 60_000 }, 'homepage');
   await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
   await clickCookieOrModalDismissers(page);
+  await saveStep(page, '01-before-entering-zip', { deliveryZipCode });
 
-  const body = await page.locator('body').innerText({ timeout: 10_000 }).catch(() => '');
-  if (body.includes(deliveryZipCode)) return { deliveryZipCode, accepted: true, mode: 'already-set' };
+  const initialBody = await readDeliveryPageText(page);
+  if (initialBody.includes(deliveryZipCode)) return assertDeliveryZipConfirmed(page, 'already-set');
 
   const triggers = ['button:has-text("ZIP")', 'button:has-text("Delivery ZIP")', 'a:has-text("ZIP")', 'button:has-text("Delivery Location")', 'button:has-text("Change")', '[aria-label*="ZIP" i]'];
   for (const selector of triggers) {
@@ -130,29 +146,34 @@ async function ensureDeliveryZipCode(page) {
     throw new Error(`Unable to find Costco Business Center delivery ZIP input before scraping. Screenshot saved to ${screenshotPath}.`);
   }
   await zipInput.fill(deliveryZipCode);
+  await saveStep(page, '02-after-entering-zip', { deliveryZipCode });
 
   const submitScope = (await activeDrawer.isVisible({ timeout: 1_000 }).catch(() => false)) ? activeDrawer : page;
-  const preferredSubmit = submitScope.locator('[data-testid="deliverylocationform--submit"]').first();
-  const fallbackSubmit = submitScope.locator('button:has-text("Set Delivery ZIP Code"), button:has-text("Update"), button:has-text("Submit"), button:has-text("Save"), input[type="submit"]').first();
-  const submit = (await preferredSubmit.isVisible({ timeout: 3_000 }).catch(() => false)) ? preferredSubmit : fallbackSubmit;
-
-  if (await submit.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await submit.click({ timeout: 5_000 }).catch(async (error) => {
-      await submit.scrollIntoViewIfNeeded({ timeout: 5_000 });
-      await submit.click({ timeout: 5_000, force: true }).catch(() => { throw error; });
-    });
-  } else {
-    await zipInput.press('Enter');
+  const exactSubmit = submitScope.getByRole('button', { name: /^Set Delivery ZIP Code$/ }).first();
+  if (!(await exactSubmit.isVisible({ timeout: 10_000 }).catch(() => false))) {
+    const screenshotPath = await saveStep(page, 'set-delivery-zip-code-button-not-found', { deliveryZipCode });
+    throw new Error(`Unable to find exact Costco Business Center button "Set Delivery ZIP Code" after entering ${deliveryZipCode}. Screenshot saved to ${screenshotPath}.`);
   }
 
+  await exactSubmit.click({ timeout: 10_000 }).catch(async (error) => {
+    await exactSubmit.scrollIntoViewIfNeeded({ timeout: 5_000 });
+    await exactSubmit.click({ timeout: 5_000, force: true }).catch(() => { throw error; });
+  });
+
   await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
-  await Promise.race([
-    activeDrawer.waitFor({ state: 'hidden', timeout: 20_000 }).catch(() => undefined),
-    page.waitForFunction((zip) => document.body.innerText.includes(zip), deliveryZipCode, { timeout: 20_000 }).catch(() => undefined)
-  ]);
-  await page.waitForFunction((zip) => document.body.innerText.includes(zip) || /delivery|business delivery/i.test(document.body.innerText), deliveryZipCode, { timeout: 20_000 });
-  await saveStep(page, '01-delivery-zip-accepted', { deliveryZipCode });
-  return { deliveryZipCode, accepted: true, mode: 'set-during-run' };
+  if (await activeDrawer.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    await activeDrawer.waitFor({ state: 'hidden', timeout: 30_000 }).catch(async () => {
+      const screenshotPath = await saveStep(page, 'delivery-drawer-did-not-close', { deliveryZipCode });
+      throw new Error(`Costco Business Center delivery ZIP drawer/modal did not close after setting ${deliveryZipCode}. Screenshot saved to ${screenshotPath}.`);
+    });
+  }
+
+  await page.waitForFunction((zip) => document.body.innerText.includes(zip), deliveryZipCode, { timeout: 30_000 }).catch(async () => {
+    const screenshotPath = await saveStep(page, 'delivery-zip-not-visible-after-submit', { deliveryZipCode });
+    throw new Error(`Costco Business Center did not show selected delivery ZIP/location ${deliveryZipCode} after the drawer closed. Screenshot saved to ${screenshotPath}.`);
+  });
+
+  return assertDeliveryZipConfirmed(page, 'set-during-run');
 }
 
 async function searchForInstantSavings(page) {
