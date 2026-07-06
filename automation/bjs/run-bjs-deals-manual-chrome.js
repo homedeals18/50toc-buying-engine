@@ -2,11 +2,13 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const cdpEndpoint = process.env.BJS_CHROME_CDP_ENDPOINT ?? 'http://127.0.0.1:9222';
 const cdpUrl = new URL(cdpEndpoint);
 const remoteDebuggingPort = cdpUrl.port || '9222';
-const artifactRoot = path.resolve(process.cwd(), '../../artifacts/bjs');
+const automationDir = path.dirname(fileURLToPath(import.meta.url));
+const artifactRoot = path.resolve(automationDir, '../../artifacts/bjs');
 const defaultProfileDir = path.join(artifactRoot, 'manual-chrome-profile');
 const manualChromeProfileDir = process.env.BJS_MANUAL_CHROME_PROFILE_DIR ?? defaultProfileDir;
 const shouldLaunchChrome = process.env.BJS_SKIP_CHROME_LAUNCH !== 'true';
@@ -101,9 +103,10 @@ async function main() {
     await launchChrome();
   }
 
-  const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const child = spawn(command, ['playwright', 'test', 'tests/deal-discovery.spec.js', '--project=chromium', '--headed'], {
+  const playwrightCli = path.join(automationDir, 'node_modules', 'playwright', 'cli.js');
+  const child = spawn(process.execPath, [playwrightCli, 'test', 'tests/deal-discovery.spec.js', '--project=chromium', '--headed'], {
     stdio: 'inherit',
+    cwd: automationDir,
     env: { ...process.env, BJS_BROWSER_MODE: 'manual-chrome', BJS_CHROME_CDP_ENDPOINT: cdpEndpoint },
     windowsHide: false
   });
