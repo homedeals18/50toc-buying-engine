@@ -90,16 +90,34 @@ async function ensureDeliveryZipCode(page) {
     }
   }
 
-  const zipInput = page.locator('input[name*="zip" i], input[id*="zip" i], input[placeholder*="zip" i], input[aria-label*="zip" i], input[type="tel"], input[type="text"]').first();
+  const activeDrawer = page.locator('[role="dialog"]:visible, .DrawerV2:visible, [class*="DrawerV2"]:visible, [class*="drawer"]:visible').last();
+  const zipScope = (await activeDrawer.isVisible({ timeout: 5_000 }).catch(() => false)) ? activeDrawer : page;
+  const zipInput = zipScope.locator('input[name*="zip" i], input[id*="zip" i], input[placeholder*="zip" i], input[aria-label*="zip" i], input[type="tel"], input[type="text"]').first();
   if (!(await zipInput.isVisible({ timeout: 10_000 }).catch(() => false))) {
     const screenshotPath = await saveStep(page, 'delivery-zip-input-not-found');
     throw new Error(`Unable to find Costco Business Center delivery ZIP input before scraping. Screenshot saved to ${screenshotPath}.`);
   }
   await zipInput.fill(deliveryZipCode);
-  const submit = page.locator('button:has-text("Set"), button:has-text("Update"), button:has-text("Submit"), button:has-text("Save"), button:has-text("Delivery"), input[type="submit"]').first();
-  if (await submit.isVisible({ timeout: 3_000 }).catch(() => false)) await submit.click({ timeout: 5_000 });
-  else await zipInput.press('Enter');
+
+  const submitScope = (await activeDrawer.isVisible({ timeout: 1_000 }).catch(() => false)) ? activeDrawer : page;
+  const preferredSubmit = submitScope.locator('[data-testid="deliverylocationform--submit"]').first();
+  const fallbackSubmit = submitScope.locator('button:has-text("Set Delivery ZIP Code"), button:has-text("Update"), button:has-text("Submit"), button:has-text("Save"), input[type="submit"]').first();
+  const submit = (await preferredSubmit.isVisible({ timeout: 3_000 }).catch(() => false)) ? preferredSubmit : fallbackSubmit;
+
+  if (await submit.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await submit.click({ timeout: 5_000 }).catch(async (error) => {
+      await submit.scrollIntoViewIfNeeded({ timeout: 5_000 });
+      await submit.click({ timeout: 5_000, force: true }).catch(() => { throw error; });
+    });
+  } else {
+    await zipInput.press('Enter');
+  }
+
   await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
+  await Promise.race([
+    activeDrawer.waitFor({ state: 'hidden', timeout: 20_000 }).catch(() => undefined),
+    page.waitForFunction((zip) => document.body.innerText.includes(zip), deliveryZipCode, { timeout: 20_000 }).catch(() => undefined)
+  ]);
   await page.waitForFunction((zip) => document.body.innerText.includes(zip) || /delivery|business delivery/i.test(document.body.innerText), deliveryZipCode, { timeout: 20_000 });
   await saveStep(page, '01-delivery-zip-accepted', { deliveryZipCode });
   return { deliveryZipCode, accepted: true, mode: 'set-during-run' };
