@@ -165,6 +165,26 @@ async function readDeliveryPageText(page) {
   return page.locator('body').innerText({ timeout: 10_000 }).catch(() => '');
 }
 
+function deliveryDrawerLocator(page) {
+  return page.locator('[role="dialog"]:visible, .DrawerV2:visible, [class*="DrawerV2"]:visible, [class*="drawer"]:visible')
+    .filter({ hasText: /change\s+delivery\s+location|delivery\s+zip\s+code|set\s+delivery\s+zip\s+code/i })
+    .last();
+}
+
+async function findVisibleSetDeliveryLocationTrigger(page) {
+  const triggers = [
+    page.getByRole('button', { name: /set\s+delivery\s+location/i }).first(),
+    page.getByRole('link', { name: /set\s+delivery\s+location/i }).first(),
+    page.locator('a:has-text("Set Delivery Location"), button:has-text("Set Delivery Location")').first()
+  ];
+
+  for (const trigger of triggers) {
+    if (await trigger.isVisible({ timeout: 5_000 }).catch(() => false)) return trigger;
+  }
+
+  return null;
+}
+
 async function assertDeliveryZipConfirmed(page, mode) {
   const body = await readDeliveryPageText(page);
   if (body.includes(deliveryZipCode)) {
@@ -177,33 +197,42 @@ async function assertDeliveryZipConfirmed(page, mode) {
 }
 
 async function ensureDeliveryZipCode(page) {
-  await gotoAndCheck(page, '/', { waitUntil: 'domcontentloaded', timeout: 60_000 }, 'homepage');
-  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+  await gotoAndCheck(page, '/', { waitUntil: 'load', timeout: 60_000 }, 'homepage');
+  await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => undefined);
   await clickCookieOrModalDismissers(page);
   await saveStep(page, '01-before-entering-zip', { deliveryZipCode });
 
   const initialBody = await readDeliveryPageText(page);
   if (initialBody.includes(deliveryZipCode)) return assertDeliveryZipConfirmed(page, 'already-set');
 
-  const triggers = ['button:has-text("ZIP")', 'button:has-text("Delivery ZIP")', 'a:has-text("ZIP")', 'button:has-text("Delivery Location")', 'button:has-text("Change")', '[aria-label*="ZIP" i]'];
-  for (const selector of triggers) {
-    const trigger = page.locator(selector).first();
-    if (await trigger.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await trigger.click({ timeout: 5_000 }).catch(() => undefined);
-      break;
-    }
+  const trigger = await findVisibleSetDeliveryLocationTrigger(page);
+  if (!trigger) {
+    const screenshotPath = await saveStep(page, 'set-delivery-location-not-found', { deliveryZipCode });
+    throw new Error(`Unable to find a visible "Set Delivery Location" link or button before setting ${deliveryZipCode}. Screenshot saved to ${screenshotPath}.`);
+  }
+  console.log('[costco-business-center] Found Set Delivery Location');
+
+  await trigger.scrollIntoViewIfNeeded({ timeout: 10_000 });
+  await trigger.click({ timeout: 10_000 });
+  console.log('[costco-business-center] Clicked Set Delivery Location');
+
+  let activeDrawer = deliveryDrawerLocator(page);
+  if (!(await activeDrawer.isVisible({ timeout: 2_000 }).catch(() => false))) {
+    await trigger.click({ timeout: 10_000, force: true });
+    console.log('[costco-business-center] Clicked Set Delivery Location with force:true');
   }
 
-  const activeDrawer = page.locator('[role="dialog"]:visible, .DrawerV2:visible, [class*="DrawerV2"]:visible, [class*="drawer"]:visible').last();
+  activeDrawer = deliveryDrawerLocator(page);
   if (!(await activeDrawer.isVisible({ timeout: 15_000 }).catch(() => false))) {
     const screenshotPath = await saveStep(page, 'delivery-zip-drawer-not-visible', { deliveryZipCode });
     throw new Error(`Costco Business Center delivery ZIP drawer did not become visible before typing ${deliveryZipCode}. Screenshot saved to ${screenshotPath}.`);
   }
   await waitForLocatorToBeFullyVisible(activeDrawer, 15_000);
+  console.log('[costco-business-center] Drawer opened');
 
   const zipInput = await findVisibleDeliveryZipInput(activeDrawer);
   const zipInputFound = await zipInput.isVisible({ timeout: 10_000 }).catch(() => false);
-  console.log(`[costco-business-center] visible ZIP input inside active drawer found: ${zipInputFound}`);
+  if (zipInputFound) console.log('[costco-business-center] ZIP input found');
   await saveStep(page, '02-before-typing-zip', { deliveryZipCode, zipInputFound });
   if (!zipInputFound) {
     const screenshotPath = await saveStep(page, 'delivery-zip-input-not-found', { deliveryZipCode, zipInputFound });
@@ -211,6 +240,7 @@ async function ensureDeliveryZipCode(page) {
   }
 
   await keyboardClearAndTypeZip(page, zipInput);
+  console.log('[costco-business-center] ZIP typed');
 
   const typedDeliveryZipCode = await zipInput.inputValue({ timeout: 5_000 });
   console.log(`[costco-business-center] ZIP input value after typing: ${typedDeliveryZipCode}`);
@@ -230,6 +260,7 @@ async function ensureDeliveryZipCode(page) {
     await exactSubmit.scrollIntoViewIfNeeded({ timeout: 5_000 });
     await exactSubmit.click({ timeout: 5_000, force: true }).catch(() => { throw error; });
   });
+  console.log('[costco-business-center] ZIP confirmed');
   await saveStep(page, '04-after-clicking-set-delivery-zip-code', { deliveryZipCode, typedDeliveryZipCode });
 
   await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
