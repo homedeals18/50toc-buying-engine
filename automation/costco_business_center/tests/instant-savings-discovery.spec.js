@@ -66,6 +66,38 @@ async function saveStep(page, name, details = {}) {
   return screenshotPath;
 }
 
+
+async function saveDomDebug(page, name, details = {}) {
+  await ensureArtifactDirs();
+  const safeName = name.replace(/[^a-z0-9-]+/gi, '-').toLowerCase();
+  const screenshotPath = await saveStep(page, name, details);
+  const [html, bodyText, anchorSamples, productSignalSummary] = await Promise.all([
+    page.content().catch(() => ''),
+    page.locator('body').innerText({ timeout: 5_000 }).catch(() => ''),
+    page.evaluate(() => [...document.querySelectorAll('a[href]')].slice(0, 300).map((anchor) => ({
+      href: anchor.href,
+      text: anchor.textContent?.replace(/\s+/g, ' ').trim() || null,
+      ariaLabel: anchor.getAttribute('aria-label'),
+      title: anchor.getAttribute('title'),
+      imgAlt: anchor.querySelector('img')?.getAttribute('alt') || null,
+      visible: !!(anchor.offsetWidth || anchor.offsetHeight || anchor.getClientRects().length)
+    }))).catch(() => []),
+    page.evaluate(() => {
+      const hrefs = [...document.querySelectorAll('a[href]')].map((anchor) => anchor.getAttribute('href') || '');
+      return {
+        anchorCount: hrefs.length,
+        productLikeAnchorCount: hrefs.filter((href) => /(?:\/p\/|\/product(?:[/?#]|$)|\.product\.\d+\.html|ProductDisplay|productId=|partNumber=)/i.test(href)).length,
+        itemTextMatchCount: (document.body.innerText.match(/(?:Item\s*#?|SKU)\s*[:#-]?\s*[A-Z0-9-]{3,}/gi) || []).length,
+        priceTextMatchCount: (document.body.innerText.match(/\$\s*\d+(?:,\d{3})*(?:\.\d{2})?/g) || []).length
+      };
+    }).catch(() => ({}))
+  ]);
+  await writeFile(path.join(logDir, `${safeName}.html`), html);
+  await writeFile(path.join(logDir, `${safeName}-text.txt`), bodyText);
+  await writeFile(path.join(logDir, `${safeName}.json`), JSON.stringify({ ...details, url: page.url(), title: await page.title().catch(() => ''), anchorSamples, productSignalSummary, savedAt: new Date().toISOString(), screenshotPath }, null, 2));
+  return screenshotPath;
+}
+
 async function clickCookieOrModalDismissers(page) {
   for (const selector of ['button:has-text("Accept")', 'button:has-text("I Agree")', 'button:has-text("Got it")', 'button[aria-label*="close" i]', 'button:has-text("No Thanks")']) {
     const button = page.locator(selector).first();
@@ -136,9 +168,13 @@ async function searchForInstantSavings(page) {
     await Promise.all([page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => undefined), allOnline.click({ timeout: 10_000 })]);
     await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
   }
-  const hasProducts = await page.locator('a[href*="/p/"], a[href*="/product"], a[href*=".product."]').first().isVisible({ timeout: 15_000 }).catch(() => false);
-  const screenshotPath = await saveStep(page, hasProducts ? '02-all-online-instant-savings' : '02-all-online-instant-savings-no-products', { hasProducts });
-  if (!hasProducts) throw new Error(`All Online Instant Savings did not show product tiles. Screenshot saved to ${screenshotPath}.`);
+  await page.waitForFunction(() => [...document.querySelectorAll('a[href]')].some((anchor) => /(?:\/p\/|\/product(?:[/?#]|$)|\.product\.\d+\.html|ProductDisplay|productId=|partNumber=)/i.test(anchor.getAttribute('href') || '')), { timeout: 15_000 }).catch(() => undefined);
+  const productTileSignals = await detectProductTileSignals(page);
+  const hasProducts = productTileSignals.productTileCount > 0;
+  const screenshotPath = hasProducts
+    ? await saveStep(page, '02-all-online-instant-savings', { hasProducts, productTileSignals })
+    : await saveDomDebug(page, '02-all-online-instant-savings-no-products', { hasProducts, productTileSignals });
+  if (!hasProducts) throw new Error(`All Online Instant Savings did not show product tiles. Screenshot and DOM debug saved to ${screenshotPath}.`);
   await writeFile(path.join(logDir, 'all-online-instant-savings-url.txt'), `${page.url()}\n`);
   return page.url();
 }
@@ -184,42 +220,72 @@ async function saveProgress(products) {
   await writeFile(shoppingListReportPath, JSON.stringify(buildShoppingListReport(unifiedProducts), null, 2));
 }
 
+function productTileExtractorScript({ dealSourceName, relevantSources, excludedSource, varietySource, filterAllowed = false }) {
+  const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
+  const absUrl = (value) => { try { return value ? new URL(value, location.href).toString() : null; } catch { return null; } };
+  const relevant = relevantSources.map((source) => new RegExp(source, 'i'));
+  const excluded = new RegExp(excludedSource, 'i');
+  const variety = new RegExp(varietySource, 'i');
+  const prices = (text) => [...text.matchAll(/\$\s*\d+(?:,\d{3})*(?:\.\d{2})?/g)].map((match) => match[0].replace(/\s+/g, ''));
+  const visible = (node) => !!(node?.offsetWidth || node?.offsetHeight || node?.getClientRects().length);
+  const productHrefPattern = /(?:\/p\/|\/product(?:[/?#]|$)|\.product\.\d+\.html|ProductDisplay|productId=|partNumber=)/i;
+  const nonProductHrefPattern = /\/cart|\/checkout|\/account|\/orders?|\/customer-service|\/warehouse|\/sitemap|\/privacy|\/terms|\/login|\/register|\/category|\/catalogsearch|\/s\?/i;
+  const itemFromHref = (href) => clean(href?.match(/\.product\.(\d+)\.html/i)?.[1] || href?.match(/[?&](?:productId|partNumber)=(\d+)/i)?.[1]);
+  const categoryFrom = (card) => clean(document.querySelector('[aria-label*="breadcrumb" i], nav[aria-label*="breadcrumb" i]')?.textContent || card.closest('[data-category]')?.getAttribute('data-category'));
+  const findCard = (link) => {
+    let best = link;
+    for (let node = link, depth = 0; node && depth < 9; depth += 1, node = node.parentElement) {
+      const text = node.textContent || '';
+      const linkCount = node.querySelectorAll?.('a[href]')?.length ?? 0;
+      const hasProductSignal = node.querySelector('img') && (/\$|Instant Savings|Save|Limit|Delivery|Item\s*#?/i.test(text) || itemFromHref(link.getAttribute('href')));
+      if (hasProductSignal && linkCount <= 8) best = node;
+      if (/^(LI|ARTICLE)$/i.test(node.tagName) && hasProductSignal) return node;
+    }
+    return best.closest('li, article, [data-testid*="product" i], [class*="product" i], [data-testid*="item" i], div') || best;
+  };
+  const nameFrom = (card, link, image) => clean(
+    link.getAttribute('aria-label') ||
+    link.getAttribute('title') ||
+    link.querySelector('[aria-label]')?.getAttribute('aria-label') ||
+    link.querySelector('img')?.getAttribute('alt') ||
+    card.querySelector('[data-testid*="name" i], [data-testid*="description" i], [class*="description" i], [class*="name" i], [id*="description" i], [id*="title" i], h2, h3, h4')?.textContent ||
+    link.textContent ||
+    image?.getAttribute('alt')
+  );
+  const links = [...document.querySelectorAll('a[href]')].filter((link) => {
+    const href = link.getAttribute('href') || '';
+    return visible(link) && productHrefPattern.test(href) && !nonProductHrefPattern.test(href);
+  });
+  const seen = new Set();
+  return links.map((link) => {
+    const productUrl = absUrl(link.getAttribute('href'));
+    if (!productUrl || seen.has(productUrl)) return null;
+    const card = findCard(link);
+    const text = clean(card.textContent) || '';
+    const image = card.querySelector('img[alt], img') || link.querySelector('img[alt], img');
+    const productName = nameFrom(card, link, image);
+    const sku = clean(text.match(/(?:Item\s*#?|SKU)\s*[:#-]?\s*([A-Z0-9-]{3,})/i)?.[1]) || itemFromHref(productUrl);
+    const hasVisibleName = !!(productName && productName.length >= 3 && !/^view details?$/i.test(productName));
+    const hasStableProductSignals = !!(productUrl && (sku || hasVisibleName));
+    if (!hasStableProductSignals) return null;
+    seen.add(productUrl);
+    const category = categoryFrom(card);
+    const combined = [category, productName, text].filter(Boolean).join(' ');
+    if (filterAllowed && (variety.test(combined) || excluded.test(combined))) return null;
+    if (filterAllowed && category && !relevant.some((pattern) => pattern.test(category))) return null;
+    const priceList = prices(text);
+    return { supplier: 'Costco Business Center', dealSource: dealSourceName, category, productName, brand: null, sku, upc: null, packageSize: clean(text.match(/\b\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|fl oz|ct|count|pack|pk|lb|lbs|gallon|gal|qt)\b(?:\s*[xX]\s*\d+)?/i)?.[0]), currentPrice: priceList[0] ?? null, originalPrice: priceList[1] ?? null, discount: clean(text.match(/(?:instant\s+savings|save\s*\$?\d+(?:\.\d{2})?|\d+%\s*off)/i)?.[0]), coupon: clean(text.match(/(?:instant savings|coupon|clip|save \$?\d+)[^.]{0,120}/i)?.[0]), availability: clean(text.match(/(?:in stock|out of stock|available|delivery)[^.]{0,80}/i)?.[0]), quantityLimit: clean(text.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]), productUrl, imageUrl: absUrl(image?.currentSrc || image?.getAttribute('src')), scanDate: new Date().toISOString() };
+  }).filter(Boolean);
+}
+
+async function detectProductTileSignals(page) {
+  return page.evaluate(productTileExtractorScript, { dealSourceName: dealSource.name, relevantSources: relevantCategoryPatterns.map((p) => p.source), excludedSource: globalExcludedPattern.source, varietySource: varietyPackPattern.source, filterAllowed: false }).then((products) => ({ productTileCount: products.length, sampleProducts: products.slice(0, 10) }));
+}
+
 async function extractListingProducts(page) {
   await loadMoreProductsIfAvailable(page);
   for (let i = 0; i < 2; i += 1) { await page.mouse.wheel(0, 1800).catch(() => undefined); await page.waitForTimeout(750); }
-  return page.evaluate(({ dealSourceName, relevantSources, excludedSource, varietySource }) => {
-    const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
-    const absUrl = (value) => { try { return value ? new URL(value, location.href).toString() : null; } catch { return null; } };
-    const relevant = relevantSources.map((source) => new RegExp(source, 'i'));
-    const excluded = new RegExp(excludedSource, 'i');
-    const variety = new RegExp(varietySource, 'i');
-    const prices = (text) => [...text.matchAll(/\$\s*\d+(?:,\d{3})*(?:\.\d{2})?/g)].map((match) => match[0].replace(/\s+/g, ''));
-    const categoryFrom = (card) => clean(document.querySelector('[aria-label*="breadcrumb" i], nav[aria-label*="breadcrumb" i]')?.textContent || card.closest('[data-category]')?.getAttribute('data-category'));
-    const findCard = (link) => {
-      let node = link;
-      for (let depth = 0; node && depth < 8; depth += 1, node = node.parentElement) {
-        if (node.querySelector('img') && /\$|Instant Savings|Save|Limit|Delivery/i.test(node.textContent || '')) return node;
-      }
-      return link.closest('li, article, [data-testid*="product" i], [class*="product" i], div') || link;
-    };
-    const links = [...document.querySelectorAll('a[href*="/p/"], a[href*="/product"], a[href*=".product."]')].filter((link) => link.offsetParent !== null);
-    const seen = new Set();
-    return links.map((link) => {
-      const productUrl = absUrl(link.getAttribute('href'));
-      if (!productUrl || seen.has(productUrl)) return null;
-      seen.add(productUrl);
-      const card = findCard(link);
-      const text = clean(card.textContent) || '';
-      const image = card.querySelector('img');
-      const productName = clean(card.querySelector('[data-testid*="name" i], [class*="description" i], [class*="name" i], h2, h3, a')?.textContent) || clean(image?.getAttribute('alt'));
-      const category = categoryFrom(card);
-      const combined = [category, productName, text].filter(Boolean).join(' ');
-      if (variety.test(combined) || excluded.test(combined)) return null;
-      if (category && !relevant.some((pattern) => pattern.test(category))) return null;
-      const priceList = prices(text);
-      return { supplier: 'Costco Business Center', dealSource: dealSourceName, category, productName, brand: null, sku: clean(text.match(/(?:Item|Item #|SKU)\s*[:#-]?\s*([A-Z0-9-]{3,})/i)?.[1]), upc: null, packageSize: clean(text.match(/\b\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|fl oz|ct|count|pack|pk|lb|lbs|gallon|gal|qt)\b(?:\s*[xX]\s*\d+)?/i)?.[0]), currentPrice: priceList[0] ?? null, originalPrice: priceList[1] ?? null, discount: clean(text.match(/(?:instant\s+savings|save\s*\$?\d+(?:\.\d{2})?|\d+%\s*off)/i)?.[0]), coupon: clean(text.match(/(?:instant savings|coupon|clip|save \$?\d+)[^.]{0,120}/i)?.[0]), availability: clean(text.match(/(?:in stock|out of stock|available|delivery)[^.]{0,80}/i)?.[0]), quantityLimit: clean(text.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]), productUrl, imageUrl: absUrl(image?.currentSrc || image?.getAttribute('src')), scanDate: new Date().toISOString() };
-    }).filter(Boolean);
-  }, { dealSourceName: dealSource.name, relevantSources: relevantCategoryPatterns.map((p) => p.source), excludedSource: globalExcludedPattern.source, varietySource: varietyPackPattern.source });
+  return page.evaluate(productTileExtractorScript, { dealSourceName: dealSource.name, relevantSources: relevantCategoryPatterns.map((p) => p.source), excludedSource: globalExcludedPattern.source, varietySource: varietyPackPattern.source, filterAllowed: false });
 }
 
 async function enrichProductFromPage(page, listingProduct, index) {
@@ -250,9 +316,15 @@ test.describe('Costco Business Center store shopping list intelligence', () => {
     const listingScreenshots = [];
     for (let i = 0; i < maxListingScreenshots; i += 1) { listingScreenshots.push(await saveStep(page, `02-instant-savings-listing-page-${i + 1}`)); await page.mouse.wheel(0, 1400).catch(() => undefined); await page.waitForTimeout(750); }
     const listingProducts = await extractListingProducts(page);
+    console.log(`Costco Business Center ${dealSource.name}: detected ${listingProducts.length} visible product tiles before opening product pages.`);
     if (listingProducts.length === 0) {
-      const screenshotPath = await saveStep(page, 'instant-savings-no-scrapable-products');
-      throw new Error(`Costco Business Center All Online Instant Savings had no scrapable allowed products. Screenshot saved to ${screenshotPath}.`);
+      const visualProductSignals = await page.evaluate(() => ({
+        visibleImages: [...document.querySelectorAll('img')].filter((node) => !!(node.offsetWidth || node.offsetHeight || node.getClientRects().length)).slice(0, 100).map((node) => ({ alt: node.getAttribute('alt'), src: node.currentSrc || node.getAttribute('src') })),
+        priceTextMatchCount: (document.body.innerText.match(/\$\s*\d+(?:,\d{3})*(?:\.\d{2})?/g) || []).length,
+        itemTextMatchCount: (document.body.innerText.match(/(?:Item\s*#?|SKU)\s*[:#-]?\s*[A-Z0-9-]{3,}/gi) || []).length
+      })).catch(() => ({}));
+      const screenshotPath = await saveDomDebug(page, 'instant-savings-no-scrapable-products', { detectedProductTileCount: listingProducts.length, visualProductSignals });
+      throw new Error(`Costco Business Center All Online Instant Savings had no detected visible product tiles. Screenshot and DOM debug saved to ${screenshotPath}.`);
     }
     const products = [];
     for (const [index, product] of listingProducts.slice(0, maxProducts).entries()) {
