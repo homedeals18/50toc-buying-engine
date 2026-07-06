@@ -313,12 +313,32 @@ async function loadMoreProductsIfAvailable(page) {
   }
 }
 
-function productAllowed(product) {
+function productRejectionReasons(product) {
+  const reasons = [];
   const combined = [product.category, product.productName, product.brand].filter(Boolean).join(' ');
-  if (varietyPackPattern.test(combined)) return false;
-  if (globalExcludedPattern.test(combined)) return false;
-  if (!product.category) return true;
-  return relevantCategoryPatterns.some((pattern) => pattern.test(product.category)) && !globalExcludedPattern.test(product.category);
+  const requiredFields = [
+    ['productName', 'product name'],
+    ['currentPrice', 'current price'],
+    ['originalPrice', 'original price'],
+    ['discount', 'savings amount'],
+    ['productUrl', 'product URL'],
+    ['imageUrl', 'image URL'],
+    ['sku', 'SKU/item number']
+  ];
+
+  for (const [field, label] of requiredFields) {
+    if (!product[field] || String(product[field]).trim().length === 0) reasons.push(`Missing required field: ${label}`);
+  }
+  if (product.discount && !/\$\s*\d+(?:,\d{3})*(?:\.\d{2})?|\d+\s*%/i.test(String(product.discount))) reasons.push('Savings amount does not include a dollar or percentage value');
+  if (varietyPackPattern.test(combined)) reasons.push('Explicit variety/assorted/mixed/sampler product');
+  if (globalExcludedPattern.test(combined)) reasons.push('Excluded Costco Business Center category or department');
+  if (product.category && !relevantCategoryPatterns.some((pattern) => pattern.test(product.category))) reasons.push('Category is not in the allowed Costco Business Center departments');
+
+  return reasons;
+}
+
+function productAllowed(product) {
+  return productRejectionReasons(product).length === 0;
 }
 
 function unifiedDeal(product) {
@@ -343,6 +363,35 @@ async function saveProgress(products) {
   const unifiedProducts = products.map(unifiedDeal).filter(productAllowed);
   await writeFile(dealProductsPath, JSON.stringify(unifiedProducts, null, 2));
   await writeFile(shoppingListReportPath, JSON.stringify(buildShoppingListReport(unifiedProducts), null, 2));
+}
+
+function buildValidationSummary({ candidates, acceptedProducts, rejectedProducts }) {
+  return {
+    connector: 'Costco Business Center',
+    status: rejectedProducts.length === 0 ? 'production-ready' : 'validation-failed',
+    validatedAt: new Date().toISOString(),
+    totalProductsFound: candidates.length,
+    productsRejected: rejectedProducts.length,
+    rejectedProducts: rejectedProducts.map(({ product, reasons }) => ({
+      productName: product.productName ?? null,
+      sku: product.sku ?? null,
+      productUrl: product.productUrl ?? null,
+      rejectionReasons: reasons
+    })),
+    finalAcceptedProducts: acceptedProducts.map((product) => ({
+      productName: product.productName,
+      sku: product.sku,
+      currentPrice: product.currentPrice,
+      originalPrice: product.originalPrice,
+      savingsAmount: product.discount,
+      productUrl: product.productUrl,
+      imageUrl: product.imageUrl
+    }))
+  };
+}
+
+async function saveValidationSummary(candidates, acceptedProducts, rejectedProducts) {
+  await writeFile(path.join(logDir, 'costco-business-center-validation-summary.json'), JSON.stringify(buildValidationSummary({ candidates, acceptedProducts, rejectedProducts }), null, 2));
 }
 
 function productTileExtractorScript({ dealSourceName, relevantSources, excludedSource, varietySource, filterAllowed = false }) {
@@ -452,12 +501,20 @@ test.describe('Costco Business Center store shopping list intelligence', () => {
       throw new Error(`Costco Business Center All Online Instant Savings had no detected visible product tiles. Screenshot and DOM debug saved to ${screenshotPath}.`);
     }
     const products = [];
+    const validatedCandidates = [];
+    const rejectedProducts = [];
     for (const [index, product] of listingProducts.slice(0, maxProducts).entries()) {
       const enrichedProduct = await enrichProductFromPage(page, product, index);
-      if (productAllowed(enrichedProduct)) { products.push(enrichedProduct); await saveProgress(products); }
-      else console.log(`Costco Business Center: skipped excluded product/category ${enrichedProduct.productName ?? enrichedProduct.productUrl}.`);
+      validatedCandidates.push(enrichedProduct);
+      const rejectionReasons = productRejectionReasons(enrichedProduct);
+      if (rejectionReasons.length === 0) { products.push(enrichedProduct); await saveProgress(products); }
+      else {
+        rejectedProducts.push({ product: enrichedProduct, reasons: rejectionReasons });
+        console.log(`Costco Business Center: rejected ${enrichedProduct.productName ?? enrichedProduct.productUrl}: ${rejectionReasons.join('; ')}`);
+      }
     }
     await saveProgress(products);
-    await writeFile(path.join(logDir, 'deal-execution-report.json'), JSON.stringify({ delivery, sourceReports: [{ dealSource: dealSource.name, discoveredUrl, productCount: products.length, scrapedProductLimit: maxProducts, skippedByLimitCount: Math.max(listingProducts.length - maxProducts, 0), listingScreenshots }], productCount: products.length, productLimits: { [dealSource.name]: maxProducts }, outputs: { dealProducts: dealProductsPath, shoppingListReport: shoppingListReportPath }, businessRules: { storeShoppingListOnly: true, purchasesMadePhysicallyInStoreBy50TocWorker: true, costcoBusinessCenterOnly: true, deliveryZipCode, instantSavingsOnly: true, didNotAddToCart: true, didNotCheckout: true, didNotPlaceOrder: true }, exclusions: { globalExcludedPattern: globalExcludedPattern.source, varietyPackPattern: varietyPackPattern.source }, screenshotsDirectory: screenshotDir, logsDirectory: logDir, consoleMessages, completedAt: new Date().toISOString() }, null, 2));
+    await saveValidationSummary(validatedCandidates, products.map(unifiedDeal), rejectedProducts);
+    await writeFile(path.join(logDir, 'deal-execution-report.json'), JSON.stringify({ delivery, sourceReports: [{ dealSource: dealSource.name, discoveredUrl, productCount: products.length, scrapedProductLimit: maxProducts, skippedByLimitCount: Math.max(listingProducts.length - maxProducts, 0), listingScreenshots }], productCount: products.length, productLimits: { [dealSource.name]: maxProducts }, outputs: { dealProducts: dealProductsPath, shoppingListReport: shoppingListReportPath, validationSummary: path.join(logDir, 'costco-business-center-validation-summary.json') }, businessRules: { storeShoppingListOnly: true, purchasesMadePhysicallyInStoreBy50TocWorker: true, costcoBusinessCenterOnly: true, deliveryZipCode, instantSavingsOnly: true, requiredDealFieldsValidated: true, explicitVarietyAssortedMixedSamplerProductsRejected: true, singleFlavorNamesAllowed: true, didNotAddToCart: true, didNotCheckout: true, didNotPlaceOrder: true }, exclusions: { globalExcludedPattern: globalExcludedPattern.source, varietyPackPattern: varietyPackPattern.source }, validationSummary: buildValidationSummary({ candidates: validatedCandidates, acceptedProducts: products.map(unifiedDeal), rejectedProducts }), screenshotsDirectory: screenshotDir, logsDirectory: logDir, consoleMessages, completedAt: new Date().toISOString() }, null, 2));
   });
 });
