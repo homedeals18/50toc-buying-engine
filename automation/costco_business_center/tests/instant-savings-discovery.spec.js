@@ -139,26 +139,51 @@ async function ensureDeliveryZipCode(page) {
   }
 
   const activeDrawer = page.locator('[role="dialog"]:visible, .DrawerV2:visible, [class*="DrawerV2"]:visible, [class*="drawer"]:visible').last();
-  const zipScope = (await activeDrawer.isVisible({ timeout: 5_000 }).catch(() => false)) ? activeDrawer : page;
-  const zipInput = zipScope.locator('input[name*="zip" i], input[id*="zip" i], input[placeholder*="zip" i], input[aria-label*="zip" i], input[type="tel"], input[type="text"]').first();
-  if (!(await zipInput.isVisible({ timeout: 10_000 }).catch(() => false))) {
-    const screenshotPath = await saveStep(page, 'delivery-zip-input-not-found');
-    throw new Error(`Unable to find Costco Business Center delivery ZIP input before scraping. Screenshot saved to ${screenshotPath}.`);
+  if (!(await activeDrawer.isVisible({ timeout: 15_000 }).catch(() => false))) {
+    const screenshotPath = await saveStep(page, 'delivery-zip-drawer-not-visible', { deliveryZipCode });
+    throw new Error(`Costco Business Center delivery ZIP drawer did not become visible before typing ${deliveryZipCode}. Screenshot saved to ${screenshotPath}.`);
   }
-  await zipInput.fill(deliveryZipCode);
-  await saveStep(page, '02-after-entering-zip', { deliveryZipCode });
+  await activeDrawer.waitFor({ state: 'visible', timeout: 15_000 });
+  await activeDrawer.evaluate((drawer) => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
 
-  const submitScope = (await activeDrawer.isVisible({ timeout: 1_000 }).catch(() => false)) ? activeDrawer : page;
-  const exactSubmit = submitScope.getByRole('button', { name: /^Set Delivery ZIP Code$/ }).first();
+  const zipInput = activeDrawer
+    .locator('input[name*="zip" i], input[id*="zip" i], input[placeholder*="zip" i], input[aria-label*="zip" i], input[type="tel"], input[type="text"]')
+    .filter({ visible: true })
+    .first();
+  const zipInputFound = await zipInput.isVisible({ timeout: 10_000 }).catch(() => false);
+  console.log(`[costco-business-center] visible ZIP input inside active drawer found: ${zipInputFound}`);
+  await saveStep(page, '02-before-typing-zip', { deliveryZipCode, zipInputFound });
+  if (!zipInputFound) {
+    const screenshotPath = await saveStep(page, 'delivery-zip-input-not-found', { deliveryZipCode, zipInputFound });
+    throw new Error(`Unable to find a visible Costco Business Center delivery ZIP input inside the active drawer before scraping. Screenshot saved to ${screenshotPath}.`);
+  }
+
+  await zipInput.click({ timeout: 10_000 });
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type(deliveryZipCode, { delay: 120 });
+
+  const typedDeliveryZipCode = await zipInput.inputValue({ timeout: 5_000 });
+  console.log(`[costco-business-center] ZIP input value after typing: ${typedDeliveryZipCode}`);
+  await saveStep(page, '03-after-typing-zip', { deliveryZipCode, typedDeliveryZipCode, zipInputFound });
+  if (typedDeliveryZipCode !== deliveryZipCode) {
+    const screenshotPath = await saveStep(page, 'delivery-zip-value-mismatch', { deliveryZipCode, typedDeliveryZipCode, zipInputFound });
+    throw new Error(`Costco Business Center delivery ZIP input value was "${typedDeliveryZipCode}" instead of "${deliveryZipCode}"; refusing to search Instant Savings. Screenshot saved to ${screenshotPath}.`);
+  }
+
+  const exactSubmit = activeDrawer.getByRole('button', { name: /^Set Delivery ZIP Code$/ }).first();
   if (!(await exactSubmit.isVisible({ timeout: 10_000 }).catch(() => false))) {
-    const screenshotPath = await saveStep(page, 'set-delivery-zip-code-button-not-found', { deliveryZipCode });
-    throw new Error(`Unable to find exact Costco Business Center button "Set Delivery ZIP Code" after entering ${deliveryZipCode}. Screenshot saved to ${screenshotPath}.`);
+    const screenshotPath = await saveStep(page, 'set-delivery-zip-code-button-not-found', { deliveryZipCode, typedDeliveryZipCode });
+    throw new Error(`Unable to find exact Costco Business Center button "Set Delivery ZIP Code" inside the active drawer after entering ${deliveryZipCode}. Screenshot saved to ${screenshotPath}.`);
   }
 
   await exactSubmit.click({ timeout: 10_000 }).catch(async (error) => {
     await exactSubmit.scrollIntoViewIfNeeded({ timeout: 5_000 });
     await exactSubmit.click({ timeout: 5_000, force: true }).catch(() => { throw error; });
   });
+  await saveStep(page, '04-after-clicking-set-delivery-zip-code', { deliveryZipCode, typedDeliveryZipCode });
 
   await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
   if (await activeDrawer.isVisible({ timeout: 1_000 }).catch(() => false)) {
