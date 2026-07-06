@@ -5,7 +5,7 @@ Production-ready foundation for a modular buying engine built with FastAPI, Reac
 ## Architecture
 
 - `backend/app/modules/*`: bounded backend modules for authentication, stores, products, UPC mapping, Amazon products, rule engine, buying plans, and purchase history.
-- `backend/app/connectors/*`: isolated store connector packages. BJ's, Costco Business Center, Sam's Club, and Walmart placeholders exist but are intentionally not implemented.
+- `backend/app/connectors/*`: isolated store connector packages. BJ's, Costco Business Center, Sam's Club, and Walmart placeholders exist for store integrations.
 - `backend/app/db` and `backend/app/models`: SQLAlchemy session, base metadata, and initial domain models.
 - `backend/alembic`: migration environment and initial schema migration.
 - `frontend/src`: React + TypeScript application shell.
@@ -57,7 +57,31 @@ npm run dev
 
 ## Store connectors
 
-Store integrations should implement `StoreConnector` from `backend/app/connectors/base/client.py` inside their own connector package. The placeholder packages are reserved for future BJ's, Costco Business Center, Sam's Club, and Walmart implementations.
+Store integrations should implement `StoreConnector` from `backend/app/connectors/base/client.py` inside their own connector package. Local Playwright automation currently exists for BJ's and Costco Business Center shopping-list intelligence workflows.
+
+## Costco Business Center local automation
+
+The Costco Business Center automation follows the finalized BJ's shopping-list architecture. It uses only <https://www.costcobusinessdelivery.com>, sets the delivery ZIP Code to `07601-6954` before scraping, searches for `Instant Savings`, enters the `All Online Instant Savings` section, and scrapes Instant Savings products only. The workflow prepares shopping-list artifacts for a 50TOC employee to purchase physically in store; it must not add products to cart, checkout, or place an order.
+
+One-command setup:
+
+```bash
+./scripts/setup-costco-business-center-automation.sh
+```
+
+One-command Playwright run:
+
+```bash
+./scripts/run-costco-business-center-instant-savings-test.sh
+```
+
+The deal run keeps only allowed Costco Business Center categories: Grocery dry food, Candy & Snacks, Beverages, Health & Beauty, and Health & Household. It globally excludes fresh produce, meat, poultry, seafood, dairy, refrigerated and frozen products, bakery, deli, furniture, patio, garden, electronics, TV, appliances, clothing, toys, automotive, office, pet, seasonal, and all variety-pack style products (`Variety Pack`, `Assorted`, `Mixed Flavor`, `Mixed Variety`, or `Sampler`). It writes each product in the unified deal format (`supplier`, `dealSource`, `category`, `productName`, `brand`, `sku`, `upc`, `packageSize`, `currentPrice`, `originalPrice`, `discount`, `coupon`, `availability`, `quantityLimit`, `productUrl`, `imageUrl`, `scanDate`) to `artifacts/costco_business_center/logs/deal-products.json`, writes `artifacts/costco_business_center/logs/shopping-list-report.json`, and saves progress after every accepted product.
+
+Use a testing limit when you want a short scrape:
+
+```bash
+COSTCO_BUSINESS_CENTER_MAX_INSTANT_SAVINGS_PRODUCTS=5 ./scripts/run-costco-business-center-instant-savings-test.sh
+```
 
 ## Running tests
 
