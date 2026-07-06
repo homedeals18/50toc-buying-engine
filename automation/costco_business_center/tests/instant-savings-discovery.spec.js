@@ -11,8 +11,9 @@ const maxProducts = Number(process.env.COSTCO_BUSINESS_CENTER_MAX_INSTANT_SAVING
 const dealSource = { name: 'All Online Instant Savings', searchTerm: 'Instant Savings' };
 const maxListingScreenshots = Number(process.env.COSTCO_BUSINESS_CENTER_MAX_LISTING_SCREENSHOTS ?? 2);
 const relevantCategoryPatterns = [/grocery/i, /dry\s+food/i, /candy\s*&\s*snacks/i, /snacks/i, /beverages?/i, /health\s*&\s*beauty/i, /health\s*&\s*household/i];
-const globalExcludedPattern = /fresh produce|produce|meat|poultry|seafood|dairy|milk|cheese|yogurt|butter|eggs?|refrigerated|frozen|bakery|deli|furniture|patio|garden|electronics?|\btv\b|appliances?|clothing|apparel|toys?|automotive|office|pet|seasonal/i;
-const varietyPackPattern = /variety\s+pack|assorted|mixed\s+flavo[u]?r|mixed\s+variety|sampler/i;
+const globalExcludedPattern = /fresh produce|produce|meat|poultry|seafood|dairy|milk|cheese|yogurt|butter|eggs?|refrigerated|frozen|bakery|deli|furniture|patio|garden|electronics?|\btv\b|appliances?|clothing|apparel|toys?|automotive|office|pet/i;
+// Keep ambiguous seasonal or flavor-style names for Amazon checking; reject only explicit mixed/assorted/variety products.
+const varietyPackPattern = /\b(?:variety[-\s]+pack|assorted|assortment|mixed[-\s]+pack|mixed[-\s]+variety|multi[-\s]+flavo[u]?r|flavo[u]?r[-\s]+variety|sampler)\b/i;
 const dealProductsPath = path.join(logDir, 'deal-products.json');
 const shoppingListReportPath = path.join(logDir, 'shopping-list-report.json');
 
