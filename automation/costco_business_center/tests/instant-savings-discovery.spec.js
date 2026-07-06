@@ -98,6 +98,62 @@ async function saveDomDebug(page, name, details = {}) {
   return screenshotPath;
 }
 
+
+async function waitForLocatorToBeFullyVisible(locator, timeout = 15_000) {
+  await locator.waitFor({ state: 'visible', timeout });
+  await locator.evaluate((element) => new Promise((resolve) => {
+    let previousRect = null;
+    let stableFrames = 0;
+    const isVisibleAndStable = () => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      const visible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity || 1) > 0;
+      const stable = previousRect
+        && Math.abs(previousRect.left - rect.left) < 1
+        && Math.abs(previousRect.top - rect.top) < 1
+        && Math.abs(previousRect.width - rect.width) < 1
+        && Math.abs(previousRect.height - rect.height) < 1;
+      previousRect = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+      stableFrames = visible && stable ? stableFrames + 1 : 0;
+      if (stableFrames >= 3) resolve();
+      else requestAnimationFrame(isVisibleAndStable);
+    };
+    requestAnimationFrame(isVisibleAndStable);
+  }), undefined, { timeout });
+}
+
+async function findVisibleDeliveryZipInput(activeDrawer) {
+  const scopedCandidates = [
+    activeDrawer.getByLabel(/Delivery\s+ZIP\s+Code/i).first(),
+    activeDrawer.locator('label:has-text("Delivery ZIP Code")').locator('input').first(),
+    activeDrawer.locator('input[name*="zip" i], input[id*="zip" i], input[placeholder*="zip" i], input[aria-label*="zip" i]').first(),
+    activeDrawer.locator('input[type="tel"], input[inputmode="numeric"], input[type="text"]').filter({ hasNotText: /search/i }).first()
+  ];
+
+  for (const candidate of scopedCandidates) {
+    if (await candidate.isVisible({ timeout: 2_000 }).catch(() => false)
+      && await candidate.isEditable({ timeout: 2_000 }).catch(() => false)) {
+      return candidate;
+    }
+  }
+
+  return activeDrawer.locator('input:visible').first();
+}
+
+async function keyboardClearAndTypeZip(page, zipInput) {
+  await zipInput.scrollIntoViewIfNeeded({ timeout: 5_000 }).catch(() => undefined);
+  await zipInput.click({ timeout: 10_000, position: { x: 8, y: 8 } });
+  await page.waitForFunction((element) => document.activeElement === element, await zipInput.elementHandle(), { timeout: 5_000 }).catch(async () => {
+    await zipInput.focus({ timeout: 5_000 });
+  });
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Delete');
+  for (const character of deliveryZipCode) {
+    await page.keyboard.type(character, { delay: 125 });
+  }
+}
+
 async function clickCookieOrModalDismissers(page) {
   for (const selector of ['button:has-text("Accept")', 'button:has-text("I Agree")', 'button:has-text("Got it")', 'button[aria-label*="close" i]', 'button:has-text("No Thanks")']) {
     const button = page.locator(selector).first();
@@ -143,15 +199,9 @@ async function ensureDeliveryZipCode(page) {
     const screenshotPath = await saveStep(page, 'delivery-zip-drawer-not-visible', { deliveryZipCode });
     throw new Error(`Costco Business Center delivery ZIP drawer did not become visible before typing ${deliveryZipCode}. Screenshot saved to ${screenshotPath}.`);
   }
-  await activeDrawer.waitFor({ state: 'visible', timeout: 15_000 });
-  await activeDrawer.evaluate((drawer) => new Promise((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(resolve));
-  }));
+  await waitForLocatorToBeFullyVisible(activeDrawer, 15_000);
 
-  const zipInput = activeDrawer
-    .locator('input[name*="zip" i], input[id*="zip" i], input[placeholder*="zip" i], input[aria-label*="zip" i], input[type="tel"], input[type="text"]')
-    .filter({ visible: true })
-    .first();
+  const zipInput = await findVisibleDeliveryZipInput(activeDrawer);
   const zipInputFound = await zipInput.isVisible({ timeout: 10_000 }).catch(() => false);
   console.log(`[costco-business-center] visible ZIP input inside active drawer found: ${zipInputFound}`);
   await saveStep(page, '02-before-typing-zip', { deliveryZipCode, zipInputFound });
@@ -160,10 +210,7 @@ async function ensureDeliveryZipCode(page) {
     throw new Error(`Unable to find a visible Costco Business Center delivery ZIP input inside the active drawer before scraping. Screenshot saved to ${screenshotPath}.`);
   }
 
-  await zipInput.click({ timeout: 10_000 });
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-  await page.keyboard.press('Backspace');
-  await page.keyboard.type(deliveryZipCode, { delay: 120 });
+  await keyboardClearAndTypeZip(page, zipInput);
 
   const typedDeliveryZipCode = await zipInput.inputValue({ timeout: 5_000 });
   console.log(`[costco-business-center] ZIP input value after typing: ${typedDeliveryZipCode}`);
