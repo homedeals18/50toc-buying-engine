@@ -384,17 +384,71 @@ function buildValidationSummary({ candidates, acceptedProducts, rejectedProducts
   };
 }
 
+
+function costcoPriceParsingSource() {
+  return `
+    function normalizeCostcoMoney(value) {
+      if (value === null || value === undefined) return null;
+      let raw = String(value).replace(/\u00a0/g, ' ').trim();
+      if (!raw) return null;
+      raw = raw.replace(/\s+/g, ' ');
+      const explicitDecimal = raw.match(/\$?\s*(\d{1,3}(?:,\d{3})*|\d+)\s*\.\s*(\d{2})\b/);
+      if (explicitDecimal) return '$' + explicitDecimal[1].replace(/,/g, '') + '.' + explicitDecimal[2];
+      const splitCents = raw.match(/\$\s*(\d{1,3}(?:,\d{3})*|\d+)\s+(\d{2})\b/);
+      if (splitCents) return '$' + splitCents[1].replace(/,/g, '') + '.' + splitCents[2];
+      const whole = raw.match(/\$\s*(\d{1,3}(?:,\d{3})*|\d+)\b/);
+      if (whole) {
+        const amount = whole[1].replace(/,/g, '');
+        if (!whole[1].includes(',') && /^\d{3,4}$/.test(amount)) return '$' + amount.slice(0, -2) + '.' + amount.slice(-2);
+        return '$' + amount + '.00';
+      }
+      const numeric = raw.match(/^(\d+)(?:\.(\d{1,2}))?$/);
+      if (numeric) {
+        if (!numeric[2] && /^\d{3,4}$/.test(numeric[1])) return '$' + numeric[1].slice(0, -2) + '.' + numeric[1].slice(-2);
+        return '$' + numeric[1] + '.' + (numeric[2] || '00').padEnd(2, '0');
+      }
+      return null;
+    }
+    function extractCostcoPrices(text) {
+      const source = String(text || '').replace(/\u00a0/g, ' ');
+      const patterns = [
+        /\$\s*\d{1,3}(?:,\d{3})*\s*\.\s*\d{2}\b/g,
+        /\$\s*\d{1,3}(?:,\d{3})*\s+\d{2}\b/g,
+        /\$\s*\d{1,3}(?:,\d{3})*\b/g
+      ];
+      const found = [];
+      for (const pattern of patterns) {
+        for (const match of source.matchAll(pattern)) {
+          const normalized = normalizeCostcoMoney(match[0]);
+          if (normalized && !found.includes(normalized)) found.push(normalized);
+        }
+      }
+      return found;
+    }
+    function extractCostcoDiscount(text) {
+      const source = String(text || '').replace(/\u00a0/g, ' ');
+      const match = source.match(/(?:instant\s+savings|save\s*(?:\$\s*\d{1,3}(?:,\d{3})*(?:\s*\.\s*\d{2}|\s+\d{2})?|\$?\s*\d+(?:\.\d{2})?)|\d+\s*%\s*off)/i);
+      return match ? match[0].replace(/\s+/g, ' ').trim().replace(/\$\s*(\d[\d,]*)\s+(\d{2})\b/g, '$$$1.$2') : null;
+    }
+    function extractCostcoCoupon(text) {
+      const source = String(text || '').replace(/\u00a0/g, ' ');
+      const match = source.match(/(?:instant savings|coupon|clip|save\s*(?:\$\s*\d{1,3}(?:,\d{3})*(?:\s*\.\s*\d{2}|\s+\d{2})?|\$?\s*\d+))[\s\S]{0,120}/i);
+      return match ? match[0].replace(/\s+/g, ' ').trim().replace(/\$\s*(\d[\d,]*)\s+(\d{2})\b/g, '$$$1.$2') : null;
+    }
+  `;
+}
+
 async function saveValidationSummary(candidates, acceptedProducts, rejectedProducts) {
   await writeFile(path.join(logDir, 'costco-business-center-validation-summary.json'), JSON.stringify(buildValidationSummary({ candidates, acceptedProducts, rejectedProducts }), null, 2));
 }
 
-function productTileExtractorScript({ dealSourceName, relevantSources, excludedSource, varietySource, filterAllowed = false }) {
+function productTileExtractorScript({ dealSourceName, relevantSources, excludedSource, varietySource, priceParsingSource, filterAllowed = false }) {
   const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
   const absUrl = (value) => { try { return value ? new URL(value, location.href).toString() : null; } catch { return null; } };
   const relevant = relevantSources.map((source) => new RegExp(source, 'i'));
   const excluded = new RegExp(excludedSource, 'i');
   const variety = new RegExp(varietySource, 'i');
-  const prices = (text) => [...text.matchAll(/\$\s*\d+(?:,\d{3})*(?:\.\d{2})?/g)].map((match) => match[0].replace(/\s+/g, ''));
+  eval(priceParsingSource);
   const visible = (node) => !!(node?.offsetWidth || node?.offsetHeight || node?.getClientRects().length);
   const productHrefPattern = /(?:\/p\/|\/product(?:[/?#]|$)|\.product\.\d+\.html|ProductDisplay|productId=|partNumber=)/i;
   const nonProductHrefPattern = /\/cart|\/checkout|\/account|\/orders?|\/customer-service|\/warehouse|\/sitemap|\/privacy|\/terms|\/login|\/register|\/category|\/catalogsearch|\/s\?/i;
@@ -441,36 +495,36 @@ function productTileExtractorScript({ dealSourceName, relevantSources, excludedS
     const combined = [category, productName, text].filter(Boolean).join(' ');
     if (filterAllowed && (variety.test(combined) || excluded.test(combined))) return null;
     if (filterAllowed && category && !relevant.some((pattern) => pattern.test(category))) return null;
-    const priceList = prices(text);
-    return { supplier: 'Costco Business Center', dealSource: dealSourceName, category, productName, brand: null, sku, upc: null, packageSize: clean(text.match(/\b\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|fl oz|ct|count|pack|pk|lb|lbs|gallon|gal|qt)\b(?:\s*[xX]\s*\d+)?/i)?.[0]), currentPrice: priceList[0] ?? null, originalPrice: priceList[1] ?? null, discount: clean(text.match(/(?:instant\s+savings|save\s*\$?\d+(?:\.\d{2})?|\d+%\s*off)/i)?.[0]), coupon: clean(text.match(/(?:instant savings|coupon|clip|save \$?\d+)[^.]{0,120}/i)?.[0]), availability: clean(text.match(/(?:in stock|out of stock|available|delivery)[^.]{0,80}/i)?.[0]), quantityLimit: clean(text.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]), productUrl, imageUrl: absUrl(image?.currentSrc || image?.getAttribute('src')), scanDate: new Date().toISOString() };
+    const priceList = extractCostcoPrices(text);
+    return { supplier: 'Costco Business Center', dealSource: dealSourceName, category, productName, brand: null, sku, upc: null, packageSize: clean(text.match(/\b\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|fl oz|ct|count|pack|pk|lb|lbs|gallon|gal|qt)\b(?:\s*[xX]\s*\d+)?/i)?.[0]), currentPrice: priceList[0] ?? null, originalPrice: priceList[1] ?? null, discount: extractCostcoDiscount(text), coupon: extractCostcoCoupon(text), availability: clean(text.match(/(?:in stock|out of stock|available|delivery)[^.]{0,80}/i)?.[0]), quantityLimit: clean(text.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]), productUrl, imageUrl: absUrl(image?.currentSrc || image?.getAttribute('src')), scanDate: new Date().toISOString() };
   }).filter(Boolean);
 }
 
 async function detectProductTileSignals(page) {
-  return page.evaluate(productTileExtractorScript, { dealSourceName: dealSource.name, relevantSources: relevantCategoryPatterns.map((p) => p.source), excludedSource: globalExcludedPattern.source, varietySource: varietyPackPattern.source, filterAllowed: false }).then((products) => ({ productTileCount: products.length, sampleProducts: products.slice(0, 10) }));
+  return page.evaluate(productTileExtractorScript, { dealSourceName: dealSource.name, relevantSources: relevantCategoryPatterns.map((p) => p.source), excludedSource: globalExcludedPattern.source, varietySource: varietyPackPattern.source, priceParsingSource: costcoPriceParsingSource(), filterAllowed: false }).then((products) => ({ productTileCount: products.length, sampleProducts: products.slice(0, 10) }));
 }
 
 async function extractListingProducts(page) {
   await loadMoreProductsIfAvailable(page);
   for (let i = 0; i < 2; i += 1) { await page.mouse.wheel(0, 1800).catch(() => undefined); await page.waitForTimeout(750); }
-  return page.evaluate(productTileExtractorScript, { dealSourceName: dealSource.name, relevantSources: relevantCategoryPatterns.map((p) => p.source), excludedSource: globalExcludedPattern.source, varietySource: varietyPackPattern.source, filterAllowed: false });
+  return page.evaluate(productTileExtractorScript, { dealSourceName: dealSource.name, relevantSources: relevantCategoryPatterns.map((p) => p.source), excludedSource: globalExcludedPattern.source, varietySource: varietyPackPattern.source, priceParsingSource: costcoPriceParsingSource(), filterAllowed: false });
 }
 
 async function enrichProductFromPage(page, listingProduct, index) {
   await gotoAndCheck(page, listingProduct.productUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 }, `product-${index + 1}`);
   await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
   const screenshotPath = await saveStep(page, `03-instant-savings-product-${String(index + 1).padStart(2, '0')}`);
-  const details = await page.evaluate(() => {
+  const details = await page.evaluate((priceParsingSource) => {
     const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
     const bodyText = clean(document.body.innerText) || '';
     const image = document.querySelector('img[alt], img');
-    const prices = [...bodyText.matchAll(/\$\s*\d+(?:,\d{3})*(?:\.\d{2})?/g)].map((match) => match[0].replace(/\s+/g, ''));
+    eval(priceParsingSource);
     const jsonProducts = [...document.querySelectorAll('script[type="application/ld+json"]')].flatMap((node) => { try { return [JSON.parse(node.textContent || 'null')].flat(Infinity); } catch { return []; } }).filter((entry) => /Product/i.test(String(entry?.['@type'] ?? '')));
     const productJson = jsonProducts[0] ?? {};
     const offer = Array.isArray(productJson.offers) ? productJson.offers[0] : productJson.offers;
     const absUrl = (value) => { try { return value ? new URL(value, location.href).toString() : null; } catch { return null; } };
-    return { productName: clean(productJson.name) || clean(document.querySelector('h1, [data-testid*="product-name" i]')?.textContent), brand: clean(typeof productJson.brand === 'string' ? productJson.brand : productJson.brand?.name), sku: clean(productJson.sku) || clean(bodyText.match(/(?:Item|Item #|SKU)\s*[:#-]?\s*([A-Z0-9-]{3,})/i)?.[1]), upc: clean(productJson.gtin12 || productJson.gtin13 || productJson.gtin14 || productJson.gtin) || clean(bodyText.match(/(?:UPC|GTIN)\s*[:#-]?\s*([0-9-]{8,14})/i)?.[1]), category: clean(document.querySelector('[aria-label*="breadcrumb" i], nav[aria-label*="breadcrumb" i]')?.textContent), packageSize: clean(bodyText.match(/\b\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|fl oz|ct|count|pack|pk|lb|lbs|gallon|gal|qt)\b(?:\s*[xX]\s*\d+)?/i)?.[0]), currentPrice: offer?.price ? String(offer.price) : prices[0] ?? null, originalPrice: prices[1] ?? null, discount: clean(bodyText.match(/(?:instant\s+savings|save\s*\$?\d+(?:\.\d{2})?|\d+%\s*off)/i)?.[0]), coupon: clean(bodyText.match(/(?:instant savings|coupon|clip|save \$?\d+)[^.]{0,120}/i)?.[0]), availability: clean(offer?.availability) || clean(bodyText.match(/(?:in stock|out of stock|available|delivery)[^.]{0,100}/i)?.[0]), quantityLimit: clean(bodyText.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]), productUrl: location.href, imageUrl: absUrl(Array.isArray(productJson.image) ? productJson.image[0] : productJson.image) || absUrl(image?.currentSrc || image?.getAttribute('src')), scanDate: new Date().toISOString() };
-  });
+    return { productName: clean(productJson.name) || clean(document.querySelector('h1, [data-testid*="product-name" i]')?.textContent), brand: clean(typeof productJson.brand === 'string' ? productJson.brand : productJson.brand?.name), sku: clean(productJson.sku) || clean(bodyText.match(/(?:Item|Item #|SKU)\s*[:#-]?\s*([A-Z0-9-]{3,})/i)?.[1]), upc: clean(productJson.gtin12 || productJson.gtin13 || productJson.gtin14 || productJson.gtin) || clean(bodyText.match(/(?:UPC|GTIN)\s*[:#-]?\s*([0-9-]{8,14})/i)?.[1]), category: clean(document.querySelector('[aria-label*="breadcrumb" i], nav[aria-label*="breadcrumb" i]')?.textContent), packageSize: clean(bodyText.match(/\b\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|fl oz|ct|count|pack|pk|lb|lbs|gallon|gal|qt)\b(?:\s*[xX]\s*\d+)?/i)?.[0]), currentPrice: normalizeCostcoMoney(offer?.price) ?? extractCostcoPrices(bodyText)[0] ?? null, originalPrice: extractCostcoPrices(bodyText)[1] ?? null, discount: extractCostcoDiscount(bodyText), coupon: extractCostcoCoupon(bodyText), availability: clean(offer?.availability) || clean(bodyText.match(/(?:in stock|out of stock|available|delivery)[^.]{0,100}/i)?.[0]), quantityLimit: clean(bodyText.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]), productUrl: location.href, imageUrl: absUrl(Array.isArray(productJson.image) ? productJson.image[0] : productJson.image) || absUrl(image?.currentSrc || image?.getAttribute('src')), scanDate: new Date().toISOString() };
+  }, costcoPriceParsingSource());
   return unifiedDeal({ ...listingProduct, ...Object.fromEntries(Object.entries(details).filter(([, value]) => value)), screenshotPath });
 }
 
