@@ -46,7 +46,7 @@ export const defaultConnectorRegistry = [
   {
     id: 'sams_club',
     name: "Sam's Club",
-    enabled: false,
+    enabled: true,
     dealProductsPath: resolveArtifactPath('sams_club', 'logs', 'deal-products.json')
   }
 ];

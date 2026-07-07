@@ -1,0 +1,14 @@
+{
+  "name": "sams-club-automation-local",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "scrape:sams-club:clearance": "playwright test tests/clearance-discovery.spec.js --project=chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "latest",
+    "playwright": "latest"
+  }
+}
