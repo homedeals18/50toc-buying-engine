@@ -104,6 +104,28 @@ test('loadEnabledConnectorProducts resolves relative deal-products paths from re
   }
 });
 
+
+test('loadEnabledConnectorProducts trims connector deal-products paths before checking disk', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'main-buying-engine-trimmed-path-'));
+  const dealProductsPath = path.join(tempRoot, 'artifacts', 'costco_business_center', 'logs', 'deal-products.json');
+  await mkdir(path.dirname(dealProductsPath), { recursive: true });
+  await writeFile(dealProductsPath, JSON.stringify([{ productName: 'Trimmed Path Product', currentPrice: '$4.99' }]));
+
+  try {
+    const { loaded, connectorReports } = await loadEnabledConnectorProducts([
+      { ...costco, enabled: true, dealProductsPath: ` ${dealProductsPath}
+` }
+    ]);
+
+    assert.equal(loaded.length, 1);
+    assert.equal(loaded[0].product.productName, 'Trimmed Path Product');
+    assert.equal(connectorReports[0].status, 'loaded');
+    assert.equal(connectorReports[0].resolvedDealProductsPath, dealProductsPath);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("runMainBuyingEngine preserves Costco products when BJ's deal-products.json is missing", async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'main-buying-engine-costco-'));
   const missingBjsDealProductsPath = path.join(tempRoot, 'artifacts', 'bjs', 'logs', 'deal-products.json');

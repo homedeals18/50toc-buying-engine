@@ -96,10 +96,20 @@ function toOffer(product, connector) {
   };
 }
 
+
+function isPathAbsoluteOnAnyPlatform(filePath) {
+  return path.isAbsolute(filePath) || path.win32.isAbsolute(filePath) || path.posix.isAbsolute(filePath);
+}
+
+function normalizeConnectorPath(dealProductsPath) {
+  return String(dealProductsPath).trim();
+}
+
 function resolveDealProductsPath(dealProductsPath) {
-  const resolvedDealProductsPath = path.isAbsolute(dealProductsPath)
-    ? dealProductsPath
-    : path.resolve(repositoryRoot, dealProductsPath);
+  const normalizedDealProductsPath = normalizeConnectorPath(dealProductsPath);
+  const resolvedDealProductsPath = isPathAbsoluteOnAnyPlatform(normalizedDealProductsPath)
+    ? path.normalize(normalizedDealProductsPath)
+    : path.resolve(repositoryRoot, normalizedDealProductsPath);
   return {
     repoRoot: repositoryRoot,
     resolvedDealProductsPath,
