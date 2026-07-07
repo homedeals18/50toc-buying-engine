@@ -1,6 +1,7 @@
 import { chromium, test as base } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { runBuyingPipeline, writeCombinedShoppingListReport } from '../../shared/buying-engine.js';
 
 const artifactRoot = path.resolve(process.cwd(), '../../artifacts/bjs');
 const screenshotDir = path.join(artifactRoot, 'screenshots');
@@ -306,8 +307,9 @@ function unifiedDeal(product) {
 async function saveProgress(products) {
   await ensureArtifactDirs();
   const unifiedProducts = products.map(unifiedDeal).filter(categoryAllowed);
-  await writeFile(dealProductsPath, JSON.stringify(unifiedProducts, null, 2));
-  await writeFile(shoppingListReportPath, JSON.stringify(buildShoppingListReport(unifiedProducts), null, 2));
+  const evaluatedProducts = await runBuyingPipeline(unifiedProducts);
+  await writeFile(dealProductsPath, JSON.stringify(evaluatedProducts, null, 2));
+  await writeCombinedShoppingListReport("BJ's Wholesale Club", evaluatedProducts, shoppingListReportPath);
 }
 
 async function extractListingProducts(page, dealSource) {
@@ -439,27 +441,7 @@ async function enrichProductFromPage(page, listingProduct, index) {
   return unifiedDeal({ ...listingProduct, ...Object.fromEntries(Object.entries(details).filter(([, value]) => value)), screenshotPath });
 }
 
-function buildShoppingListReport(products) {
-  return products.map((product) => ({
-    recommendedStore: product.supplier,
-    product: product.productName,
-    price: product.currentPrice,
-    dealSource: product.dealSource,
-    url: product.productUrl,
-    notes: [
-      product.brand && `Brand: ${product.brand}`,
-      product.sku && `SKU/item: ${product.sku}`,
-      product.upc && `UPC: ${product.upc}`,
-      product.packageSize && `Package: ${product.packageSize}`,
-      product.originalPrice && `Original: ${product.originalPrice}`,
-      product.discount && `Discount: ${product.discount}`,
-      product.coupon && `Coupon: ${product.coupon}`,
-      product.availability && `Availability: ${product.availability}`,
-      product.quantityLimit && `Limit: ${product.quantityLimit}`,
-      'Purchase in store by 50TOC worker'
-    ].filter(Boolean).join(' | ')
-  }));
-}
+
 
 test.describe("BJ's store shopping list intelligence", () => {
   test('scrapes Clearance and Wow Deals data only, without cart or checkout actions', async ({ page }) => {

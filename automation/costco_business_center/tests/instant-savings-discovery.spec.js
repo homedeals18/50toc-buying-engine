@@ -1,6 +1,7 @@
 import { chromium, test as base } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { businessRejectionReasons, runBuyingPipeline, varietyPackPattern, writeCombinedShoppingListReport } from '../../shared/buying-engine.js';
 
 const artifactRoot = path.resolve(process.cwd(), '../../artifacts/costco_business_center');
 const screenshotDir = path.join(artifactRoot, 'screenshots');
@@ -13,7 +14,6 @@ const maxListingScreenshots = Number(process.env.COSTCO_BUSINESS_CENTER_MAX_LIST
 const relevantCategoryPatterns = [/grocery/i, /dry\s+food/i, /candy\s*&\s*snacks/i, /snacks/i, /beverages?/i, /health\s*&\s*beauty/i, /health\s*&\s*household/i];
 const globalExcludedPattern = /fresh produce|produce|meat|poultry|seafood|dairy|milk|cheese|yogurt|butter|eggs?|refrigerated|frozen|bakery|deli|furniture|patio|garden|electronics?|\btv\b|appliances?|clothing|apparel|toys?|automotive|office|pet/i;
 // Keep ambiguous seasonal or flavor-style names for Amazon checking; reject only explicit mixed/assorted/variety products.
-const varietyPackPattern = /\b(?:variety[-\s]+pack|assorted|assortment|mixed[-\s]+pack|mixed[-\s]+variety|multi[-\s]+flavo[u]?r|flavo[u]?r[-\s]+variety|sampler)\b/i;
 const dealProductsPath = path.join(logDir, 'deal-products.json');
 const shoppingListReportPath = path.join(logDir, 'shopping-list-report.json');
 
@@ -330,7 +330,7 @@ function productRejectionReasons(product) {
     if (!product[field] || String(product[field]).trim().length === 0) reasons.push(`Missing required field: ${label}`);
   }
   if (product.discount && !/\$\s*\d+(?:,\d{3})*(?:\.\d{2})?|\d+\s*%/i.test(String(product.discount))) reasons.push('Savings amount does not include a dollar or percentage value');
-  if (varietyPackPattern.test(combined)) reasons.push('Explicit variety/assorted/mixed/sampler product');
+  reasons.push(...businessRejectionReasons(product));
   if (globalExcludedPattern.test(combined)) reasons.push('Excluded Costco Business Center category or department');
   if (product.category && !relevantCategoryPatterns.some((pattern) => pattern.test(product.category))) reasons.push('Category is not in the allowed Costco Business Center departments');
 
@@ -352,17 +352,11 @@ function unifiedDeal(product) {
   };
 }
 
-function buildShoppingListReport(products) {
-  return products.map((product) => ({
-    recommendedStore: product.supplier, product: product.productName, price: product.currentPrice, dealSource: product.dealSource, url: product.productUrl,
-    notes: [product.brand && `Brand: ${product.brand}`, product.sku && `SKU/item: ${product.sku}`, product.upc && `UPC: ${product.upc}`, product.packageSize && `Package: ${product.packageSize}`, product.originalPrice && `Original: ${product.originalPrice}`, product.discount && `Discount: ${product.discount}`, product.coupon && `Coupon: ${product.coupon}`, product.availability && `Availability: ${product.availability}`, product.quantityLimit && `Limit: ${product.quantityLimit}`, 'Purchase in store by 50TOC worker'].filter(Boolean).join(' | ')
-  }));
-}
-
 async function saveProgress(products) {
   const unifiedProducts = products.map(unifiedDeal).filter(productAllowed);
-  await writeFile(dealProductsPath, JSON.stringify(unifiedProducts, null, 2));
-  await writeFile(shoppingListReportPath, JSON.stringify(buildShoppingListReport(unifiedProducts), null, 2));
+  const evaluatedProducts = await runBuyingPipeline(unifiedProducts);
+  await writeFile(dealProductsPath, JSON.stringify(evaluatedProducts, null, 2));
+  await writeCombinedShoppingListReport('Costco Business Center', evaluatedProducts, shoppingListReportPath);
 }
 
 function buildValidationSummary({ candidates, acceptedProducts, rejectedProducts }) {
