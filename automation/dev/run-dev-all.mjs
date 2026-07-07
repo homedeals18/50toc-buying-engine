@@ -112,7 +112,7 @@ async function productCount(filePath) {
   }
 }
 
-async function runConnector(connector) {
+export async function runConnector(connector) {
   if (!enabledByEnv(connector)) return { label: connector.label, status: 'SKIP', detail: '(disabled)' };
   console.log(cyan(`[dev:all] Running ${connector.label} connector...`));
   const result = await runCommand(connector.command, connector.args);
@@ -124,7 +124,15 @@ async function runConnector(connector) {
   return { label: connector.label, status: 'PASS', detail: count === null ? '' : `(${count} products)` };
 }
 
-const generatedJsonArtifactPaths = [
+export const generatedReportFileNames = new Set([
+  'deal-products.json',
+  'shopping-list-report.json',
+  'deal-execution-report.json',
+  'final-shopping-list.json',
+  'final-execution-report.json'
+]);
+
+export const generatedJsonArtifactPaths = [
   resolveArtifactPath('bjs', 'logs', 'deal-products.json'),
   resolveArtifactPath('bjs', 'logs', 'shopping-list-report.json'),
   resolveArtifactPath('bjs', 'logs', 'deal-execution-report.json'),
@@ -133,11 +141,10 @@ const generatedJsonArtifactPaths = [
   resolveArtifactPath('costco_business_center', 'logs', 'deal-execution-report.json'),
   resolveArtifactPath('main', 'final-shopping-list.json'),
   resolveArtifactPath('main', 'final-execution-report.json')
-];
+].filter((file) => generatedReportFileNames.has(path.basename(file)));
 
-
-async function validateGeneratedJson() {
-  const files = generatedJsonArtifactPaths.filter((file) => existsSync(file));
+export async function validateGeneratedJson(filesToValidate = generatedJsonArtifactPaths) {
+  const files = filesToValidate.filter((file) => generatedReportFileNames.has(path.basename(file)) && existsSync(file));
   const failures = [];
   for (const file of files) {
     try { await readJson(file); } catch (error) { failures.push(`${toProjectRelativePath(file)}: ${error.message}`); }
@@ -145,42 +152,48 @@ async function validateGeneratedJson() {
   return { status: failures.length ? 'FAIL' : 'PASS', detail: failures.length ? `(${failures.length} invalid files)` : `(${files.length} files)`, failures };
 }
 
-printHeader();
-const summary = [];
-summary.push({ label: 'Repository', ...(await verifyRepositoryStatus()) });
-summary.push({ label: 'Folders', ...(await verifyRequiredFolders()) });
+export async function runDevAll() {
+  printHeader();
+  const summary = [];
+  summary.push({ label: 'Repository', ...(await verifyRepositoryStatus()) });
+  summary.push({ label: 'Folders', ...(await verifyRequiredFolders()) });
 
-for (const connector of connectors) {
-  summary.push(await runConnector(connector));
+  for (const connector of connectors) {
+    summary.push(await runConnector(connector));
+  }
+
+  let mainFailed = false;
+  try {
+    console.log(cyan('[dev:all] Running Main Buying Engine...'));
+    await runMainBuyingEngine(defaultConnectorRegistry.map((entry) => {
+      const devConnector = connectors.find((connector) => connector.id === entry.id);
+      return devConnector ? { ...entry, enabled: enabledByEnv(devConnector) } : entry;
+    }));
+    summary.push({ label: 'Main Engine', status: 'PASS', detail: '' });
+  } catch (error) {
+    mainFailed = true;
+    summary.push({ label: 'Main Engine', status: 'FAIL', detail: `(${error.message})` });
+  }
+
+  const shoppingCount = await productCount(resolveArtifactPath('main', 'final-shopping-list.json'));
+  summary.push({ label: 'Shopping List', status: shoppingCount === null ? 'FAIL' : 'PASS', detail: shoppingCount === null ? '(missing or invalid)' : `(${shoppingCount} products)` });
+  summary.push({ label: 'Execution Report', status: existsSync(resolveArtifactPath('main', 'final-execution-report.json')) ? 'PASS' : 'FAIL', detail: '' });
+  const validation = await validateGeneratedJson();
+  summary.push({ label: 'JSON Validation', status: validation.status, detail: validation.detail });
+
+  console.log('\n====================================');
+  for (const item of summary) formatSummaryLine(item.label, item.status, item.detail);
+  if (validation.failures?.length) {
+    console.log('\nInvalid JSON files:');
+    for (const failure of validation.failures) console.log(`- ${failure}`);
+  }
+  console.log('====================================');
+  console.log(mainFailed ? red('Finished With Main Engine Failure') : green('Finished Successfully'));
+  console.log('====================================');
+
+  process.exitCode = mainFailed ? 1 : 0;
 }
 
-let mainFailed = false;
-try {
-  console.log(cyan('[dev:all] Running Main Buying Engine...'));
-  await runMainBuyingEngine(defaultConnectorRegistry.map((entry) => {
-    const devConnector = connectors.find((connector) => connector.id === entry.id);
-    return devConnector ? { ...entry, enabled: enabledByEnv(devConnector) } : entry;
-  }));
-  summary.push({ label: 'Main Engine', status: 'PASS', detail: '' });
-} catch (error) {
-  mainFailed = true;
-  summary.push({ label: 'Main Engine', status: 'FAIL', detail: `(${error.message})` });
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await runDevAll();
 }
-
-const shoppingCount = await productCount(resolveArtifactPath('main', 'final-shopping-list.json'));
-summary.push({ label: 'Shopping List', status: shoppingCount === null ? 'FAIL' : 'PASS', detail: shoppingCount === null ? '(missing or invalid)' : `(${shoppingCount} products)` });
-summary.push({ label: 'Execution Report', status: existsSync(resolveArtifactPath('main', 'final-execution-report.json')) ? 'PASS' : 'FAIL', detail: '' });
-const validation = await validateGeneratedJson();
-summary.push({ label: 'JSON Validation', status: validation.status, detail: validation.detail });
-
-console.log('\n====================================');
-for (const item of summary) formatSummaryLine(item.label, item.status, item.detail);
-if (validation.failures?.length) {
-  console.log('\nInvalid JSON files:');
-  for (const failure of validation.failures) console.log(`- ${failure}`);
-}
-console.log('====================================');
-console.log(mainFailed ? red('Finished With Main Engine Failure') : green('Finished Successfully'));
-console.log('====================================');
-
-process.exitCode = mainFailed ? 1 : 0;
