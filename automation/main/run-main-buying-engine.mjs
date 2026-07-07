@@ -1,0 +1,196 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const repositoryRoot = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
+const mainArtifactRoot = path.join(repositoryRoot, 'artifacts/main');
+const finalShoppingListPath = path.join(mainArtifactRoot, 'final-shopping-list.json');
+const finalExecutionReportPath = path.join(mainArtifactRoot, 'final-execution-report.json');
+
+export const defaultConnectorRegistry = [
+  {
+    id: 'bjs',
+    name: "BJ's Wholesale Club",
+    enabled: true,
+    dealProductsPath: path.join(repositoryRoot, 'artifacts/bjs/logs/deal-products.json')
+  },
+  {
+    id: 'costco_business_center',
+    name: 'Costco Business Center',
+    enabled: true,
+    dealProductsPath: path.join(repositoryRoot, 'artifacts/costco_business_center/logs/deal-products.json')
+  },
+  {
+    id: 'sams_club',
+    name: "Sam's Club",
+    enabled: false,
+    dealProductsPath: path.join(repositoryRoot, 'artifacts/sams_club/logs/deal-products.json')
+  }
+];
+
+function clean(value) {
+  return String(value ?? '').trim().replace(/\s+/g, ' ');
+}
+
+function normalized(value) {
+  return clean(value).toLowerCase();
+}
+
+function moneyToNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(String(value).replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function productIdentity(product) {
+  const upc = clean(product.upc);
+  if (upc) return { key: `upc:${upc}`, strategy: 'UPC', value: upc };
+
+  const brand = normalized(product.brand);
+  const productName = normalized(product.productName);
+  const packageSize = normalized(product.packageSize);
+  const fallback = [brand, productName, packageSize].join('|');
+  return { key: `brand-name-size:${fallback}`, strategy: 'Brand + Product Name + Package Size', value: fallback };
+}
+
+function toOffer(product, connector) {
+  const purchasePrice = moneyToNumber(product.currentPrice ?? product.price);
+  return {
+    storeId: connector.id,
+    storeName: product.supplier ?? connector.name,
+    purchasePrice,
+    purchasePriceDisplay: product.currentPrice ?? product.price ?? null,
+    originalPrice: product.originalPrice ?? null,
+    discount: product.discount ?? null,
+    coupon: product.coupon ?? null,
+    dealSource: product.dealSource ?? null,
+    availability: product.availability ?? null,
+    quantityLimit: product.quantityLimit ?? null,
+    productUrl: product.productUrl ?? null,
+    sku: product.sku ?? null,
+    buyingDecision: product.buyingDecision ?? null,
+    amazonAsin: product.amazonAsin ?? null,
+    amazonSellingPrice: product.amazonSellingPrice ?? null,
+    amazonFees: product.amazonFees ?? null,
+    estimatedProfit: product.estimatedProfit ?? null,
+    roi: product.roi ?? null,
+    rejectionReasons: product.rejectionReasons ?? []
+  };
+}
+
+async function loadConnectorProducts(connector) {
+  const raw = await readFile(connector.dealProductsPath, 'utf8');
+  const parsed = JSON.parse(raw);
+  if (!Array.isArray(parsed)) throw new Error(`${connector.name} deal-products.json must contain an array`);
+  return parsed.map((product) => ({ ...product, supplier: product.supplier ?? connector.name }));
+}
+
+export async function loadEnabledConnectorProducts(connectors = defaultConnectorRegistry) {
+  const connectorReports = [];
+  const loaded = [];
+
+  for (const connector of connectors.filter((entry) => entry.enabled !== false)) {
+    try {
+      const products = await loadConnectorProducts(connector);
+      loaded.push(...products.map((product) => ({ product, connector })));
+      connectorReports.push({
+        connectorId: connector.id,
+        connectorName: connector.name,
+        status: 'loaded',
+        dealProductsPath: connector.dealProductsPath,
+        productCount: products.length
+      });
+    } catch (error) {
+      connectorReports.push({
+        connectorId: connector.id,
+        connectorName: connector.name,
+        status: 'missing_or_failed',
+        dealProductsPath: connector.dealProductsPath,
+        productCount: 0,
+        error: error.message
+      });
+    }
+  }
+
+  return { loaded, connectorReports };
+}
+
+export function mergeProducts(loadedProducts) {
+  const byIdentity = new Map();
+
+  for (const { product, connector } of loadedProducts) {
+    const identity = productIdentity(product);
+    if (!byIdentity.has(identity.key)) {
+      byIdentity.set(identity.key, {
+        identity,
+        upc: clean(product.upc) || null,
+        brand: product.brand ?? null,
+        productName: product.productName ?? null,
+        packageSize: product.packageSize ?? null,
+        category: product.category ?? null,
+        offers: []
+      });
+    }
+
+    const merged = byIdentity.get(identity.key);
+    merged.offers.push(toOffer(product, connector));
+  }
+
+  return [...byIdentity.values()].map((product) => {
+    const pricedOffers = product.offers.filter((offer) => offer.purchasePrice !== null);
+    const lowestPurchasePrice = pricedOffers.length ? Math.min(...pricedOffers.map((offer) => offer.purchasePrice)) : null;
+    const lowestOffers = lowestPurchasePrice === null ? [] : product.offers.filter((offer) => offer.purchasePrice === lowestPurchasePrice);
+    return {
+      ...product,
+      offerCount: product.offers.length,
+      storeCount: new Set(product.offers.map((offer) => offer.storeId)).size,
+      lowestPurchasePrice,
+      lowestPurchasePriceDisplay: lowestPurchasePrice === null ? null : `$${lowestPurchasePrice.toFixed(2)}`,
+      lowestPurchaseStores: lowestOffers.map((offer) => offer.storeName),
+      offers: product.offers.map((offer) => ({ ...offer, isLowestPurchasePrice: lowestPurchasePrice !== null && offer.purchasePrice === lowestPurchasePrice }))
+    };
+  });
+}
+
+export function buildExecutionReport({ connectorReports, finalProducts }) {
+  const totalLoadedProducts = connectorReports.reduce((sum, connector) => sum + connector.productCount, 0);
+  return {
+    pipeline: 'main-buying-engine',
+    completedAt: new Date().toISOString(),
+    connectors: connectorReports,
+    totals: {
+      loadedProducts: totalLoadedProducts,
+      uniqueProducts: finalProducts.length,
+      duplicateOffersMerged: Math.max(totalLoadedProducts - finalProducts.length, 0),
+      productsWithMultipleOffers: finalProducts.filter((product) => product.offerCount > 1).length,
+      productsWithLowestPurchasePrice: finalProducts.filter((product) => product.lowestPurchasePrice !== null).length
+    },
+    deduplication: {
+      primary: 'UPC',
+      fallback: 'Brand + Product Name + Package Size',
+      keepsEveryStoreOffer: true,
+      marksLowestPurchasePrice: true
+    },
+    outputs: {
+      finalShoppingList: finalShoppingListPath,
+      finalExecutionReport: finalExecutionReportPath
+    }
+  };
+}
+
+export async function runMainBuyingEngine(connectors = defaultConnectorRegistry) {
+  await mkdir(mainArtifactRoot, { recursive: true });
+  const { loaded, connectorReports } = await loadEnabledConnectorProducts(connectors);
+  const finalProducts = mergeProducts(loaded);
+  const report = buildExecutionReport({ connectorReports, finalProducts });
+  await writeFile(finalShoppingListPath, JSON.stringify(finalProducts, null, 2));
+  await writeFile(finalExecutionReportPath, JSON.stringify(report, null, 2));
+  return { finalProducts, report };
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const { finalProducts, report } = await runMainBuyingEngine();
+  console.log(`Main Buying Engine complete: ${finalProducts.length} unique products from ${report.totals.loadedProducts} loaded offers.`);
+  console.log(`Wrote ${finalShoppingListPath}`);
+  console.log(`Wrote ${finalExecutionReportPath}`);
+}

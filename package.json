@@ -3,6 +3,7 @@
   "scripts": {
     "scrape:bjs:deals:manual-chrome": "npm --prefix automation/bjs run scrape:bjs:deals:manual-chrome",
     "scrape:bjs:deals:manual-chrome:direct": "node automation/bjs/run-bjs-deals-manual-chrome.js",
-    "scrape:costco-business-center:instant-savings": "npm --prefix automation/costco_business_center run scrape:costco-business-center:instant-savings"
+    "scrape:costco-business-center:instant-savings": "npm --prefix automation/costco_business_center run scrape:costco-business-center:instant-savings",
+    "run:main-buying-engine": "node automation/main/run-main-buying-engine.mjs"
   }
 }
