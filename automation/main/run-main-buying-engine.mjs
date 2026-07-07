@@ -13,6 +13,11 @@ export function resolveArtifactPath(...segments) {
   return resolveProjectPath('artifacts', ...segments);
 }
 
+export function isDirectExecution(importMetaUrl, argvPath = process.argv[1]) {
+  if (!argvPath) return false;
+  return fileURLToPath(importMetaUrl) === path.resolve(argvPath);
+}
+
 export function toProjectRelativePath(absolutePath) {
   const relativePath = path.relative(repositoryRoot, absolutePath);
   if (relativePath === '' || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
@@ -258,9 +263,9 @@ export async function runMainBuyingEngine(connectors = defaultConnectorRegistry)
   return { finalProducts, report };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectExecution(import.meta.url)) {
   const { finalProducts, report } = await runMainBuyingEngine();
-  console.log(`Main Buying Engine complete: ${finalProducts.length} unique products from ${report.totals.loadedProducts} loaded offers.`);
+  console.log(`Main Buying Engine complete... ${finalProducts.length} unique products from ${report.totals.loadedProducts} loaded offers.`);
   console.log(`Wrote ${toProjectRelativePath(finalShoppingListPath)}`);
   console.log(`Wrote ${toProjectRelativePath(finalExecutionReportPath)}`);
 }
