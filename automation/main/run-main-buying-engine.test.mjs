@@ -75,6 +75,35 @@ test('loadEnabledConnectorProducts loads available connector outputs and reports
 });
 
 
+
+test('loadEnabledConnectorProducts resolves relative deal-products paths from process.cwd and reports path debug fields', async () => {
+  const originalCwd = process.cwd();
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'main-buying-engine-relative-'));
+  const relativeDealProductsPath = path.join('artifacts', 'costco_business_center', 'logs', 'deal-products.json');
+  const resolvedDealProductsPath = path.resolve(tempRoot, relativeDealProductsPath);
+  await mkdir(path.dirname(resolvedDealProductsPath), { recursive: true });
+  await writeFile(resolvedDealProductsPath, JSON.stringify([{ productName: 'Relative Costco Product', currentPrice: '$3.99' }]));
+
+  try {
+    process.chdir(tempRoot);
+    const { loaded, connectorReports } = await loadEnabledConnectorProducts([
+      { ...costco, enabled: true, dealProductsPath: relativeDealProductsPath }
+    ]);
+
+    assert.equal(loaded.length, 1);
+    assert.equal(loaded[0].product.productName, 'Relative Costco Product');
+
+    const [costcoReport] = connectorReports;
+    assert.equal(costcoReport.status, 'loaded');
+    assert.equal(costcoReport.dealProductsPath, resolvedDealProductsPath);
+    assert.equal(costcoReport.repoRoot, tempRoot);
+    assert.equal(costcoReport.resolvedDealProductsPath, resolvedDealProductsPath);
+    assert.equal(costcoReport.exists, true);
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
 test("runMainBuyingEngine preserves Costco products when BJ's deal-products.json is missing", async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'main-buying-engine-costco-'));
   const missingBjsDealProductsPath = path.join(tempRoot, 'artifacts', 'bjs', 'logs', 'deal-products.json');
