@@ -5,6 +5,8 @@ import { samsClubConnectorConfig as config } from './connector-config.mjs';
 test('Sam\'s Club connector defaults to the first 10 clearance products and no commerce actions', () => {
   assert.equal(config.maxProducts, 10);
   assert.equal(config.dealSource.name, 'Clearance');
+  assert.equal(config.fallbackDealSource.name, 'Savings');
+  assert.equal(Object.hasOwn(config.dealSource, 'searchTerm'), false);
   assert.equal(config.clubLocation, 'Secaucus, NJ 07094');
   assert.deepEqual(config.noCommerceActions, {
     login: false,
