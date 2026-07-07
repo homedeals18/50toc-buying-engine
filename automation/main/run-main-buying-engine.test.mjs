@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
-import { mergeProducts } from './run-main-buying-engine.mjs';
+import { loadEnabledConnectorProducts, mergeProducts, resolveProjectPath } from './run-main-buying-engine.mjs';
 
 const bjs = { id: 'bjs', name: "BJ's Wholesale Club" };
 const costco = { id: 'costco_business_center', name: 'Costco Business Center' };
@@ -27,4 +30,30 @@ test('mergeProducts falls back to brand, product name, and package size when UPC
 
   assert.equal(products.length, 2);
   assert.equal(products.find((product) => product.brand === 'Acme ')?.offerCount, 2);
+});
+
+test('resolveProjectPath resolves connector artifacts from the current project root', () => {
+  assert.equal(resolveProjectPath('artifacts', 'bjs', 'logs', 'deal-products.json'), path.join(process.cwd(), 'artifacts', 'bjs', 'logs', 'deal-products.json'));
+});
+
+test('loadEnabledConnectorProducts loads available connector outputs and reports the resolved missing path', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'main-buying-engine-'));
+  const bjsDealProductsPath = path.join(tempRoot, 'artifacts', 'bjs', 'logs', 'deal-products.json');
+  const missingCostcoDealProductsPath = path.join(tempRoot, 'artifacts', 'costco_business_center', 'logs', 'deal-products.json');
+  await mkdir(path.dirname(bjsDealProductsPath), { recursive: true });
+  await writeFile(bjsDealProductsPath, JSON.stringify([{ productName: 'BJs Product', currentPrice: '$1.99' }]));
+
+  const { loaded, connectorReports } = await loadEnabledConnectorProducts([
+    { ...bjs, enabled: true, dealProductsPath: bjsDealProductsPath },
+    { ...costco, enabled: true, dealProductsPath: missingCostcoDealProductsPath }
+  ]);
+
+  assert.equal(loaded.length, 1);
+  assert.equal(loaded[0].product.productName, 'BJs Product');
+  assert.equal(loaded[0].product.supplier, bjs.name);
+
+  const costcoReport = connectorReports.find((report) => report.connectorId === costco.id);
+  assert.equal(costcoReport.status, 'missing_or_failed');
+  assert.equal(costcoReport.dealProductsPath, missingCostcoDealProductsPath);
+  assert.match(costcoReport.error, new RegExp(`Missing Costco Business Center deal-products\\.json at ${missingCostcoDealProductsPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
 });

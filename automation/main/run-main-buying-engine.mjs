@@ -1,30 +1,33 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-const repositoryRoot = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
+export const repositoryRoot = path.resolve(process.cwd());
 const mainArtifactRoot = path.join(repositoryRoot, 'artifacts/main');
 const finalShoppingListPath = path.join(mainArtifactRoot, 'final-shopping-list.json');
 const finalExecutionReportPath = path.join(mainArtifactRoot, 'final-execution-report.json');
+
+export function resolveProjectPath(...segments) {
+  return path.resolve(repositoryRoot, ...segments);
+}
 
 export const defaultConnectorRegistry = [
   {
     id: 'bjs',
     name: "BJ's Wholesale Club",
     enabled: true,
-    dealProductsPath: path.join(repositoryRoot, 'artifacts/bjs/logs/deal-products.json')
+    dealProductsPath: resolveProjectPath('artifacts', 'bjs', 'logs', 'deal-products.json')
   },
   {
     id: 'costco_business_center',
     name: 'Costco Business Center',
     enabled: true,
-    dealProductsPath: path.join(repositoryRoot, 'artifacts/costco_business_center/logs/deal-products.json')
+    dealProductsPath: resolveProjectPath('artifacts', 'costco_business_center', 'logs', 'deal-products.json')
   },
   {
     id: 'sams_club',
     name: "Sam's Club",
     enabled: false,
-    dealProductsPath: path.join(repositoryRoot, 'artifacts/sams_club/logs/deal-products.json')
+    dealProductsPath: resolveProjectPath('artifacts', 'sams_club', 'logs', 'deal-products.json')
   }
 ];
 
@@ -79,7 +82,16 @@ function toOffer(product, connector) {
 }
 
 async function loadConnectorProducts(connector) {
-  const raw = await readFile(connector.dealProductsPath, 'utf8');
+  const dealProductsPath = path.resolve(connector.dealProductsPath);
+  let raw;
+  try {
+    raw = await readFile(dealProductsPath, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      throw new Error(`Missing ${connector.name} deal-products.json at ${dealProductsPath}`);
+    }
+    throw error;
+  }
   const parsed = JSON.parse(raw);
   if (!Array.isArray(parsed)) throw new Error(`${connector.name} deal-products.json must contain an array`);
   return parsed.map((product) => ({ ...product, supplier: product.supplier ?? connector.name }));
@@ -97,7 +109,7 @@ export async function loadEnabledConnectorProducts(connectors = defaultConnector
         connectorId: connector.id,
         connectorName: connector.name,
         status: 'loaded',
-        dealProductsPath: connector.dealProductsPath,
+        dealProductsPath: path.resolve(connector.dealProductsPath),
         productCount: products.length
       });
     } catch (error) {
@@ -105,7 +117,7 @@ export async function loadEnabledConnectorProducts(connectors = defaultConnector
         connectorId: connector.id,
         connectorName: connector.name,
         status: 'missing_or_failed',
-        dealProductsPath: connector.dealProductsPath,
+        dealProductsPath: path.resolve(connector.dealProductsPath),
         productCount: 0,
         error: error.message
       });
