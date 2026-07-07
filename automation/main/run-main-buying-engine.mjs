@@ -3,32 +3,45 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const mainArtifactRoot = path.join(repositoryRoot, 'artifacts/main');
-const finalShoppingListPath = path.join(mainArtifactRoot, 'final-shopping-list.json');
-const finalExecutionReportPath = path.join(mainArtifactRoot, 'final-execution-report.json');
 
 export function resolveProjectPath(...segments) {
   return path.resolve(repositoryRoot, ...segments);
 }
+
+export function resolveArtifactPath(...segments) {
+  return resolveProjectPath('artifacts', ...segments);
+}
+
+export function toProjectRelativePath(absolutePath) {
+  const relativePath = path.relative(repositoryRoot, absolutePath);
+  if (relativePath === '' || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    return absolutePath;
+  }
+  return relativePath.split(path.sep).join(path.posix.sep);
+}
+
+const mainArtifactRoot = resolveArtifactPath('main');
+const finalShoppingListPath = resolveArtifactPath('main', 'final-shopping-list.json');
+const finalExecutionReportPath = resolveArtifactPath('main', 'final-execution-report.json');
 
 export const defaultConnectorRegistry = [
   {
     id: 'bjs',
     name: "BJ's Wholesale Club",
     enabled: true,
-    dealProductsPath: resolveProjectPath('artifacts', 'bjs', 'logs', 'deal-products.json')
+    dealProductsPath: resolveArtifactPath('bjs', 'logs', 'deal-products.json')
   },
   {
     id: 'costco_business_center',
     name: 'Costco Business Center',
     enabled: true,
-    dealProductsPath: resolveProjectPath('artifacts', 'costco_business_center', 'logs', 'deal-products.json')
+    dealProductsPath: resolveArtifactPath('costco_business_center', 'logs', 'deal-products.json')
   },
   {
     id: 'sams_club',
     name: "Sam's Club",
     enabled: false,
-    dealProductsPath: resolveProjectPath('artifacts', 'sams_club', 'logs', 'deal-products.json')
+    dealProductsPath: resolveArtifactPath('sams_club', 'logs', 'deal-products.json')
   }
 ];
 
@@ -89,7 +102,7 @@ async function loadConnectorProducts(connector) {
     raw = await readFile(dealProductsPath, 'utf8');
   } catch (error) {
     if (error.code === 'ENOENT') {
-      const missingError = new Error(`Missing ${connector.name} deal-products.json at ${dealProductsPath}`);
+      const missingError = new Error(`Missing ${connector.name} deal-products.json at ${toProjectRelativePath(dealProductsPath)}`);
       missingError.code = 'MISSING_DEAL_PRODUCTS';
       missingError.isWarning = true;
       throw missingError;
@@ -114,7 +127,7 @@ export async function loadEnabledConnectorProducts(connectors = defaultConnector
         connectorName: connector.name,
         status: 'loaded',
         severity: 'info',
-        dealProductsPath: path.resolve(connector.dealProductsPath),
+        dealProductsPath: toProjectRelativePath(path.resolve(connector.dealProductsPath)),
         productCount: products.length,
         message: `Loaded ${products.length} products from ${connector.name}`
       });
@@ -125,7 +138,7 @@ export async function loadEnabledConnectorProducts(connectors = defaultConnector
         connectorName: connector.name,
         status: isMissingDealProducts ? 'missing' : 'failed',
         severity: isMissingDealProducts ? 'warning' : 'error',
-        dealProductsPath: path.resolve(connector.dealProductsPath),
+        dealProductsPath: toProjectRelativePath(path.resolve(connector.dealProductsPath)),
         productCount: 0,
         warning: isMissingDealProducts ? error.message : undefined,
         error: isMissingDealProducts ? undefined : error.message,
@@ -196,8 +209,8 @@ export function buildExecutionReport({ connectorReports, finalProducts }) {
       marksLowestPurchasePrice: true
     },
     outputs: {
-      finalShoppingList: finalShoppingListPath,
-      finalExecutionReport: finalExecutionReportPath
+      finalShoppingList: toProjectRelativePath(finalShoppingListPath),
+      finalExecutionReport: toProjectRelativePath(finalExecutionReportPath)
     }
   };
 }
@@ -219,6 +232,6 @@ export async function runMainBuyingEngine(connectors = defaultConnectorRegistry)
 if (import.meta.url === `file://${process.argv[1]}`) {
   const { finalProducts, report } = await runMainBuyingEngine();
   console.log(`Main Buying Engine complete: ${finalProducts.length} unique products from ${report.totals.loadedProducts} loaded offers.`);
-  console.log(`Wrote ${finalShoppingListPath}`);
-  console.log(`Wrote ${finalExecutionReportPath}`);
+  console.log(`Wrote ${toProjectRelativePath(finalShoppingListPath)}`);
+  console.log(`Wrote ${toProjectRelativePath(finalExecutionReportPath)}`);
 }
