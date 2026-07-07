@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { loadEnabledConnectorProducts, mergeProducts, resolveArtifactPath, resolveProjectPath, runMainBuyingEngine, toProjectRelativePath } from './run-main-buying-engine.mjs';
+import { pathToFileURL } from 'node:url';
+import { isDirectExecution, loadEnabledConnectorProducts, mergeProducts, resolveArtifactPath, resolveProjectPath, runMainBuyingEngine, toProjectRelativePath } from './run-main-buying-engine.mjs';
 
 const bjs = { id: 'bjs', name: "BJ's Wholesale Club" };
 const costco = { id: 'costco_business_center', name: 'Costco Business Center' };
@@ -46,6 +47,14 @@ test('resolveProjectPath is stable when the process is launched from a subdirect
   }
 });
 
+
+test('isDirectExecution compares file URL and argv path using filesystem paths', () => {
+  const scriptPath = resolveProjectPath('automation', 'main', 'run-main-buying-engine.mjs');
+
+  assert.equal(isDirectExecution(pathToFileURL(scriptPath).href, scriptPath), true);
+  assert.equal(isDirectExecution(pathToFileURL(scriptPath).href, path.relative(process.cwd(), scriptPath)), true);
+  assert.equal(isDirectExecution(pathToFileURL(scriptPath).href, resolveProjectPath('automation', 'main', 'run-main-buying-engine.test.mjs')), false);
+});
 
 test('toProjectRelativePath stores in-repository artifact paths without machine-specific roots', () => {
   assert.equal(toProjectRelativePath(resolveArtifactPath('main', 'final-shopping-list.json')), 'artifacts/main/final-shopping-list.json');
