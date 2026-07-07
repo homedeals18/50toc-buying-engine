@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, readdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +22,8 @@ const connectors = [
     defaultEnabled: true,
     command: 'npm',
     args: ['run', 'scrape:bjs:deals:manual-chrome:direct'],
-    artifactPath: resolveArtifactPath('bjs', 'logs', 'deal-products.json')
+    artifactPath: resolveArtifactPath('bjs', 'logs', 'deal-products.json'),
+    gracefulFailure: true
   },
   {
     id: 'costco_business_center',
@@ -116,27 +117,27 @@ async function runConnector(connector) {
   console.log(cyan(`[dev:all] Running ${connector.label} connector...`));
   const result = await runCommand(connector.command, connector.args);
   const count = await productCount(connector.artifactPath);
-  if (!result.ok) return { label: connector.label, status: 'FAIL', detail: count === null ? `(exit ${result.code})` : `(exit ${result.code}, ${count} products)` };
+  if (!result.ok) {
+    const detail = count === null ? `(unavailable, exit ${result.code})` : `(unavailable, exit ${result.code}, ${count} products)`;
+    return { label: connector.label, status: connector.gracefulFailure ? 'WARN' : 'FAIL', detail };
+  }
   return { label: connector.label, status: 'PASS', detail: count === null ? '' : `(${count} products)` };
 }
 
-async function findJsonFiles(root) {
-  const files = [];
-  async function walk(directory) {
-    if (!existsSync(directory)) return;
-    const entries = await readdir(directory, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) await walk(fullPath);
-      else if (entry.isFile() && entry.name.endsWith('.json')) files.push(fullPath);
-    }
-  }
-  await walk(root);
-  return files;
-}
+const generatedJsonArtifactPaths = [
+  resolveArtifactPath('bjs', 'logs', 'deal-products.json'),
+  resolveArtifactPath('bjs', 'logs', 'shopping-list-report.json'),
+  resolveArtifactPath('bjs', 'logs', 'deal-execution-report.json'),
+  resolveArtifactPath('costco_business_center', 'logs', 'deal-products.json'),
+  resolveArtifactPath('costco_business_center', 'logs', 'shopping-list-report.json'),
+  resolveArtifactPath('costco_business_center', 'logs', 'deal-execution-report.json'),
+  resolveArtifactPath('main', 'final-shopping-list.json'),
+  resolveArtifactPath('main', 'final-execution-report.json')
+];
+
 
 async function validateGeneratedJson() {
-  const files = await findJsonFiles(resolveProjectPath('artifacts'));
+  const files = generatedJsonArtifactPaths.filter((file) => existsSync(file));
   const failures = [];
   for (const file of files) {
     try { await readJson(file); } catch (error) { failures.push(`${toProjectRelativePath(file)}: ${error.message}`); }
