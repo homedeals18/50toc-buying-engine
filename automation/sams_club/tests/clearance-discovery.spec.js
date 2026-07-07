@@ -114,34 +114,115 @@ async function loadMoreProductsIfAvailable(page) {
   }
 }
 
-function productTileExtractorScript({ dealSourceName, relevantSources, excludedSource, varietySource, filterAllowed = false }) {
+function productTileExtractorScript({ dealSourceName, relevantSources, excludedSource, varietySource, filterAllowed = false, maxProducts = 10 }) {
   const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
   const absUrl = (value) => { try { return value ? new URL(value, location.href).toString() : null; } catch { return null; } };
   const relevant = relevantSources.map((source) => new RegExp(source, 'i'));
   const excluded = new RegExp(excludedSource, 'i');
   const variety = new RegExp(varietySource, 'i');
-  const visible = (node) => !!(node?.offsetWidth || node?.offsetHeight || node?.getClientRects().length);
-  const productHrefPattern = /(?:\/p\/|\/product\/|\/ip\/|prod\d+|productId=|itemId=)/i;
+  const visible = (node) => {
+    if (!node) return false;
+    const style = window.getComputedStyle(node);
+    const rect = node.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0;
+  };
+  const productHrefPattern = /(?:\/p\/|\/ip\/)/i;
+  const fallbackHrefPattern = /(?:\/product\/|prod\d+|productId=|itemId=)/i;
   const nonProductHrefPattern = /\/cart|\/checkout|\/account|\/orders?|\/login|\/register|\/membership|\/club|\/help|\/privacy|\/terms/i;
-  const itemFromHref = (href) => clean(href?.match(/(?:prod|itemId=|productId=)(\d+)/i)?.[1]);
-  const findCard = (link) => link.closest('li, article, [data-testid*="product" i], [class*="product" i], [class*="item" i], div') || link;
-  const links = [...document.querySelectorAll('a[href]')].filter((link) => visible(link) && productHrefPattern.test(link.getAttribute('href') || '') && !nonProductHrefPattern.test(link.getAttribute('href') || ''));
+  const cardSelector = [
+    '[data-testid*="product" i]',
+    '[data-automation-id*="product" i]',
+    '[data-component*="product" i]',
+    '[class*="product-card" i]',
+    '[class*="ProductCard" i]',
+    '[class*="search-result" i]',
+    '[class*="tile" i]',
+    'article',
+    'li'
+  ].join(', ');
+  const itemFromHref = (href) => clean(href?.match(/(?:prod|itemId=|productId=|\/p\/[^/]+\/)(\d+)/i)?.[1]);
+  const findCard = (link) => {
+    const semanticCard = link.closest(cardSelector);
+    if (semanticCard && visible(semanticCard)) return semanticCard;
+    let node = link.parentElement;
+    while (node && node !== document.body) {
+      const text = clean(node.textContent) || '';
+      const hasPrice = /\$\s*\d/.test(text);
+      const hasImage = !!node.querySelector('img');
+      const productLinks = [...node.querySelectorAll('a[href]')].filter((candidate) => productHrefPattern.test(candidate.getAttribute('href') || '') || fallbackHrefPattern.test(candidate.getAttribute('href') || ''));
+      if (visible(node) && hasImage && hasPrice && productLinks.length <= 4) return node;
+      node = node.parentElement;
+    }
+    return link;
+  };
+  const linkCandidates = [...document.querySelectorAll('a[href]')]
+    .filter((link) => visible(link))
+    .map((link) => ({ link, href: link.getAttribute('href') || '' }))
+    .filter(({ href }) => !nonProductHrefPattern.test(href) && (productHrefPattern.test(href) || fallbackHrefPattern.test(href)))
+    .sort((a, b) => Number(productHrefPattern.test(b.href)) - Number(productHrefPattern.test(a.href)));
   const seen = new Set();
-  return links.map((link) => {
-    const productUrl = absUrl(link.getAttribute('href'));
-    if (!productUrl || seen.has(productUrl)) return null;
+  const products = [];
+  for (const { link, href } of linkCandidates) {
+    const productUrl = absUrl(href);
+    if (!productUrl || seen.has(productUrl)) continue;
     const card = findCard(link);
+    if (!visible(card)) continue;
     const text = clean(card.textContent) || '';
     const image = card.querySelector('img[alt], img') || link.querySelector('img[alt], img');
-    const productName = clean(link.getAttribute('aria-label') || link.getAttribute('title') || link.querySelector('img')?.getAttribute('alt') || card.querySelector('[data-testid*="name" i], [class*="name" i], h2, h3, h4')?.textContent || link.textContent || image?.getAttribute('alt'));
+    const productName = clean(link.getAttribute('aria-label') || link.getAttribute('title') || link.querySelector('img')?.getAttribute('alt') || card.querySelector('[data-testid*="name" i], [data-automation-id*="name" i], [class*="name" i], [class*="title" i], h2, h3, h4')?.textContent || link.textContent || image?.getAttribute('alt'));
     const category = clean(document.querySelector('[aria-label*="breadcrumb" i], nav[aria-label*="breadcrumb" i]')?.textContent || card.closest('[data-category]')?.getAttribute('data-category'));
     const combined = [category, productName, text].filter(Boolean).join(' ');
-    if (filterAllowed && (variety.test(combined) || excluded.test(combined))) return null;
-    if (filterAllowed && category && !relevant.some((pattern) => pattern.test(category))) return null;
+    if (filterAllowed && (variety.test(combined) || excluded.test(combined))) continue;
+    if (filterAllowed && category && !relevant.some((pattern) => pattern.test(category))) continue;
     seen.add(productUrl);
     const prices = text.match(/\$\s*\d+(?:,\d{3})*(?:\.\d{2})?/g) || [];
-    return { supplier: "Sam's Club", dealSource: dealSourceName, category, productName, brand: null, sku: clean(text.match(/(?:Item|SKU|Model)\s*#?\s*:?\s*([A-Z0-9-]{3,})/i)?.[1]) || itemFromHref(productUrl), upc: null, packageSize: clean(text.match(/\b\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|fl oz|ct|count|pack|pk|lb|lbs|gallon|gal|qt)\b(?:\s*[xX]\s*\d+)?/i)?.[0]), currentPrice: prices[0] ?? null, originalPrice: prices[1] ?? null, discount: clean(text.match(/(?:save|clearance|instant savings)[^$%]{0,40}(?:\$\s*\d+(?:\.\d{2})?|\d+\s*%)/i)?.[0]), coupon: null, availability: clean(text.match(/(?:in stock|out of stock|available|pickup|shipping)[^.]{0,80}/i)?.[0]), quantityLimit: clean(text.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]), productUrl, imageUrl: absUrl(image?.currentSrc || image?.getAttribute('src')), scanDate: new Date().toISOString() };
-  }).filter(Boolean);
+    products.push({ supplier: "Sam's Club", dealSource: dealSourceName, category, productName, brand: null, sku: clean(text.match(/(?:Item|SKU|Model)\s*#?\s*:?\s*([A-Z0-9-]{3,})/i)?.[1]) || itemFromHref(productUrl), upc: null, packageSize: clean(text.match(/\b\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|fl oz|ct|count|pack|pk|lb|lbs|gallon|gal|qt)\b(?:\s*[xX]\s*\d+)?/i)?.[0]), currentPrice: prices[0] ?? null, originalPrice: prices[1] ?? null, discount: clean(text.match(/(?:save|clearance|instant savings)[^$%]{0,40}(?:\$\s*\d+(?:\.\d{2})?|\d+\s*%)/i)?.[0]), coupon: null, availability: clean(text.match(/(?:in stock|out of stock|available|pickup|shipping)[^.]{0,80}/i)?.[0]), quantityLimit: clean(text.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]), productUrl, imageUrl: absUrl(image?.currentSrc || image?.getAttribute('src')), listingText: text.slice(0, 500), scanDate: new Date().toISOString() });
+    if (products.length >= maxProducts) break;
+  }
+  return products;
+}
+
+async function saveZeroProductDebug(page, name = 'sams-club-clearance-zero-products') {
+  await ensureArtifactDirs();
+  const safeName = name.replace(/[^a-z0-9-]+/gi, '-').toLowerCase();
+  const screenshotPath = path.join(screenshotDir, `${safeName}.png`);
+  const htmlPath = path.join(logDir, `${safeName}.html`);
+  const jsonPath = path.join(logDir, `${safeName}.json`);
+  const debug = await page.evaluate(() => {
+    const clean = (value) => value?.replace(/\s+/g, ' ').trim() || '';
+    const visible = (node) => {
+      if (!node) return false;
+      const style = window.getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0;
+    };
+    const productHrefPattern = /(?:\/p\/|\/ip\/)/i;
+    const fallbackHrefPattern = /(?:\/product\/|prod\d+|productId=|itemId=)/i;
+    const productLinks = [...document.querySelectorAll('a[href]')]
+      .filter((link) => visible(link) && (productHrefPattern.test(link.getAttribute('href') || '') || fallbackHrefPattern.test(link.getAttribute('href') || '')))
+      .map((link) => ({ href: new URL(link.getAttribute('href'), location.href).toString(), text: clean(link.textContent || link.getAttribute('aria-label') || link.getAttribute('title')).slice(0, 180) }));
+    const gridCandidate = [...document.querySelectorAll('main, [role="main"], [data-testid*="product" i], [data-automation-id*="product" i], [class*="product" i], [class*="grid" i], [class*="search" i]')]
+      .filter(visible)
+      .map((node) => clean(node.innerText || node.textContent))
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length)[0] || clean(document.body.innerText).slice(0, 4000);
+    return {
+      currentUrl: location.href,
+      pageTitle: document.title,
+      visibleTextAroundProductGrid: gridCandidate.slice(0, 4000),
+      productLinksFound: productLinks.length,
+      productLinkSamples: productLinks.slice(0, 25),
+      bodyTextSample: clean(document.body.innerText).slice(0, 4000)
+    };
+  });
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  await writeFile(htmlPath, await page.content());
+  await writeFile(jsonPath, JSON.stringify({ ...debug, screenshotPath, htmlPath, savedAt: new Date().toISOString() }, null, 2));
+  console.log(`Sam's Club Clearance debug: current URL=${debug.currentUrl}`);
+  console.log(`Sam's Club Clearance debug: page title=${debug.pageTitle}`);
+  console.log(`Sam's Club Clearance debug: visible text around product grid=${debug.visibleTextAroundProductGrid.slice(0, 1000)}`);
+  console.log(`Sam's Club Clearance debug: number of product links found=${debug.productLinksFound}`);
+  return { ...debug, screenshotPath, htmlPath, jsonPath };
 }
 
 function productRejectionReasons(product) {
@@ -163,7 +244,24 @@ function unifiedDeal(product) {
 async function extractListingProducts(page) {
   await loadMoreProductsIfAvailable(page);
   for (let i = 0; i < 2; i += 1) { await page.mouse.wheel(0, 1800).catch(() => undefined); await page.waitForTimeout(750); }
-  return page.evaluate(productTileExtractorScript, { dealSourceName: config.dealSource.name, relevantSources: config.relevantCategoryPatterns.map((p) => p.source), excludedSource: config.excludedCategoryPattern.source, varietySource: varietyPackPattern.source, filterAllowed: false });
+  return page.evaluate(productTileExtractorScript, { dealSourceName: config.dealSource.name, relevantSources: config.relevantCategoryPatterns.map((p) => p.source), excludedSource: config.excludedCategoryPattern.source, varietySource: varietyPackPattern.source, filterAllowed: false, maxProducts: config.maxProducts });
+}
+
+async function visibleProductGridText(page) {
+  return page.evaluate(() => {
+    const clean = (value) => value?.replace(/\s+/g, ' ').trim() || '';
+    const visible = (node) => {
+      if (!node) return false;
+      const style = window.getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0;
+    };
+    return [...document.querySelectorAll('main, [role="main"], [data-testid*="product" i], [data-automation-id*="product" i], [class*="product" i], [class*="grid" i], [class*="search" i]')]
+      .filter(visible)
+      .map((node) => clean(node.innerText || node.textContent))
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length)[0]?.slice(0, 1000) || clean(document.body.innerText).slice(0, 1000);
+  });
 }
 
 async function enrichProductFromPage(page, listingProduct, index) {
@@ -200,7 +298,14 @@ test.describe("Sam's Club clearance shopping list intelligence", () => {
     const listingScreenshots = [];
     for (let i = 0; i < config.maxListingScreenshots; i += 1) { listingScreenshots.push(await saveStep(page, `01-clearance-listing-page-${i + 1}`)); await page.mouse.wheel(0, 1400).catch(() => undefined); await page.waitForTimeout(750); }
     const listingProducts = await extractListingProducts(page);
-    if (listingProducts.length === 0) throw new Error("Sam's Club Clearance had no detected visible product tiles.");
+    if (listingProducts.length === 0) {
+      const debug = await saveZeroProductDebug(page);
+      throw new Error(`Sam's Club Clearance had no detected visible product tiles. DOM debug saved to ${debug.jsonPath} and ${debug.htmlPath}.`);
+    }
+    console.log(`Sam's Club Clearance: current URL=${page.url()}`);
+    console.log(`Sam's Club Clearance: page title=${await page.title().catch(() => '')}`);
+    console.log(`Sam's Club Clearance: visible text around product grid=${await visibleProductGridText(page)}`);
+    console.log(`Sam's Club Clearance: number of product links found=${listingProducts.length}`);
     const products = [];
     const rejectedProducts = [];
     for (const [index, product] of listingProducts.slice(0, config.maxProducts).entries()) {
