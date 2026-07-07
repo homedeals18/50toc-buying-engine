@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -76,16 +76,15 @@ test('loadEnabledConnectorProducts loads available connector outputs and reports
 
 
 
-test('loadEnabledConnectorProducts resolves relative deal-products paths from process.cwd and reports path debug fields', async () => {
+test('loadEnabledConnectorProducts resolves relative deal-products paths from repositoryRoot when launched from a subdirectory', async () => {
   const originalCwd = process.cwd();
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'main-buying-engine-relative-'));
-  const relativeDealProductsPath = path.join('artifacts', 'costco_business_center', 'logs', 'deal-products.json');
-  const resolvedDealProductsPath = path.resolve(tempRoot, relativeDealProductsPath);
+  const relativeDealProductsPath = path.join('artifacts', 'main-buying-engine-test', 'logs', 'deal-products.json');
+  const resolvedDealProductsPath = resolveProjectPath(relativeDealProductsPath);
   await mkdir(path.dirname(resolvedDealProductsPath), { recursive: true });
   await writeFile(resolvedDealProductsPath, JSON.stringify([{ productName: 'Relative Costco Product', currentPrice: '$3.99' }]));
 
   try {
-    process.chdir(tempRoot);
+    process.chdir(path.join(originalCwd, 'automation', 'main'));
     const { loaded, connectorReports } = await loadEnabledConnectorProducts([
       { ...costco, enabled: true, dealProductsPath: relativeDealProductsPath }
     ]);
@@ -95,12 +94,13 @@ test('loadEnabledConnectorProducts resolves relative deal-products paths from pr
 
     const [costcoReport] = connectorReports;
     assert.equal(costcoReport.status, 'loaded');
-    assert.equal(costcoReport.dealProductsPath, resolvedDealProductsPath);
-    assert.equal(costcoReport.repoRoot, tempRoot);
+    assert.equal(costcoReport.dealProductsPath, relativeDealProductsPath.split(path.sep).join(path.posix.sep));
+    assert.equal(costcoReport.repoRoot, originalCwd);
     assert.equal(costcoReport.resolvedDealProductsPath, resolvedDealProductsPath);
     assert.equal(costcoReport.exists, true);
   } finally {
     process.chdir(originalCwd);
+    await rm(path.dirname(path.dirname(resolvedDealProductsPath)), { recursive: true, force: true });
   }
 });
 

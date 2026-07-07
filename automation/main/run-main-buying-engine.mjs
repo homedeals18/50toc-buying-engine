@@ -96,11 +96,12 @@ function toOffer(product, connector) {
   };
 }
 
-function resolveDealProductsPath(relativePath) {
-  const repoRoot = process.cwd();
-  const resolvedDealProductsPath = path.resolve(repoRoot, relativePath);
+function resolveDealProductsPath(dealProductsPath) {
+  const resolvedDealProductsPath = path.isAbsolute(dealProductsPath)
+    ? dealProductsPath
+    : path.resolve(repositoryRoot, dealProductsPath);
   return {
-    repoRoot,
+    repoRoot: repositoryRoot,
     resolvedDealProductsPath,
     exists: existsSync(resolvedDealProductsPath)
   };
