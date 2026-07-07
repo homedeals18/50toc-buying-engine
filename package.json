@@ -5,6 +5,7 @@
     "scrape:bjs:deals:manual-chrome:direct": "node automation/bjs/run-bjs-deals-manual-chrome.js",
     "scrape:costco-business-center:instant-savings": "npm --prefix automation/costco_business_center run scrape:costco-business-center:instant-savings",
     "run:main-buying-engine": "node automation/main/run-main-buying-engine.mjs",
-    "dev:all": "node automation/dev/run-dev-all.mjs"
+    "dev:all": "node automation/dev/run-dev-all.mjs",
+    "dev:quick": "node automation/dev/run-dev-quick.mjs"
   }
 }
