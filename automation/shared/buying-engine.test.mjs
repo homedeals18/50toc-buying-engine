@@ -4,7 +4,11 @@ import { businessRejectionReasons, runBuyingPipeline } from './buying-engine.js'
 
 test('global business filters reject explicit variety terms but keep flavor names', () => {
   assert.deepEqual(businessRejectionReasons({ productName: 'Fruity Rainbow Tropical Berry Peach Vibe Snacks' }), []);
-  for (const productName of ['Variety Pack Chips', 'Assorted Cookies', 'Mixed Pack Candy', 'Multi Flavor Bars', 'Flavor Variety Water', 'Sampler Snacks']) {
+  assert.deepEqual(businessRejectionReasons({ productName: 'Alani Nu Energy Drink, Summer Pack' }), []);
+  for (const productName of ['Blue Raspberry Energy Drink', 'Tropical Peach Vibe Drink']) {
+    assert.deepEqual(businessRejectionReasons({ productName }), []);
+  }
+  for (const productName of ['Variety Chips', 'Variety Pack Chips', 'Assorted Cookies', 'Mixed Pack Candy', 'Mixed Variety Candy', 'Multi Flavor Bars', 'Flavor Variety Water', 'Assortment Snacks', 'Sampler Snacks']) {
     assert.ok(businessRejectionReasons({ productName }).some((reason) => /variety|assorted|mixed|sampler/i.test(reason)), productName);
   }
 });
