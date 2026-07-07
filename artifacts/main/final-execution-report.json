@@ -1,0 +1,39 @@
+{
+  "pipeline": "main-buying-engine",
+  "completedAt": "2026-07-07T13:15:13.450Z",
+  "connectors": [
+    {
+      "connectorId": "bjs",
+      "connectorName": "BJ's Wholesale Club",
+      "status": "missing_or_failed",
+      "dealProductsPath": "/workspace/50toc-buying-engine/artifacts/bjs/logs/deal-products.json",
+      "productCount": 0,
+      "error": "ENOENT: no such file or directory, open '/workspace/50toc-buying-engine/artifacts/bjs/logs/deal-products.json'"
+    },
+    {
+      "connectorId": "costco_business_center",
+      "connectorName": "Costco Business Center",
+      "status": "missing_or_failed",
+      "dealProductsPath": "/workspace/50toc-buying-engine/artifacts/costco_business_center/logs/deal-products.json",
+      "productCount": 0,
+      "error": "ENOENT: no such file or directory, open '/workspace/50toc-buying-engine/artifacts/costco_business_center/logs/deal-products.json'"
+    }
+  ],
+  "totals": {
+    "loadedProducts": 0,
+    "uniqueProducts": 0,
+    "duplicateOffersMerged": 0,
+    "productsWithMultipleOffers": 0,
+    "productsWithLowestPurchasePrice": 0
+  },
+  "deduplication": {
+    "primary": "UPC",
+    "fallback": "Brand + Product Name + Package Size",
+    "keepsEveryStoreOffer": true,
+    "marksLowestPurchasePrice": true
+  },
+  "outputs": {
+    "finalShoppingList": "/workspace/50toc-buying-engine/artifacts/main/final-shopping-list.json",
+    "finalExecutionReport": "/workspace/50toc-buying-engine/artifacts/main/final-execution-report.json"
+  }
+}
