@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { loadEnabledConnectorProducts, mergeProducts, resolveProjectPath, runMainBuyingEngine } from './run-main-buying-engine.mjs';
+import { loadEnabledConnectorProducts, mergeProducts, resolveArtifactPath, resolveProjectPath, runMainBuyingEngine, toProjectRelativePath } from './run-main-buying-engine.mjs';
 
 const bjs = { id: 'bjs', name: "BJ's Wholesale Club" };
 const costco = { id: 'costco_business_center', name: 'Costco Business Center' };
@@ -32,18 +32,23 @@ test('mergeProducts falls back to brand, product name, and package size when UPC
   assert.equal(products.find((product) => product.brand === 'Acme ')?.offerCount, 2);
 });
 
-test('resolveProjectPath resolves connector artifacts from the current project root', () => {
-  assert.equal(resolveProjectPath('artifacts', 'bjs', 'logs', 'deal-products.json'), path.resolve('artifacts', 'bjs', 'logs', 'deal-products.json'));
+test('resolveArtifactPath resolves connector artifacts from the current project root', () => {
+  assert.equal(resolveArtifactPath('bjs', 'logs', 'deal-products.json'), path.resolve('artifacts', 'bjs', 'logs', 'deal-products.json'));
 });
 
 test('resolveProjectPath is stable when the process is launched from a subdirectory', async () => {
   const originalCwd = process.cwd();
   try {
     process.chdir(path.join(originalCwd, 'automation', 'main'));
-    assert.equal(resolveProjectPath('artifacts', 'costco_business_center', 'logs', 'deal-products.json'), path.join(originalCwd, 'artifacts', 'costco_business_center', 'logs', 'deal-products.json'));
+    assert.equal(resolveArtifactPath('costco_business_center', 'logs', 'deal-products.json'), path.join(originalCwd, 'artifacts', 'costco_business_center', 'logs', 'deal-products.json'));
   } finally {
     process.chdir(originalCwd);
   }
+});
+
+
+test('toProjectRelativePath stores in-repository artifact paths without machine-specific roots', () => {
+  assert.equal(toProjectRelativePath(resolveArtifactPath('main', 'final-shopping-list.json')), 'artifacts/main/final-shopping-list.json');
 });
 
 test('loadEnabledConnectorProducts loads available connector outputs and reports the resolved missing path as a warning', async () => {
@@ -87,6 +92,8 @@ test("runMainBuyingEngine preserves Costco products when BJ's deal-products.json
   assert.equal(finalProducts[0].offers[0].storeId, 'costco_business_center');
   assert.equal(report.totals.loadedProducts, 1);
   assert.equal(report.connectors.find((connector) => connector.connectorId === 'bjs').severity, 'warning');
+  assert.equal(report.outputs.finalShoppingList, 'artifacts/main/final-shopping-list.json');
+  assert.equal(report.outputs.finalExecutionReport, 'artifacts/main/final-execution-report.json');
 
   const writtenShoppingList = JSON.parse(await readFile(resolveProjectPath('artifacts', 'main', 'final-shopping-list.json'), 'utf8'));
   assert.equal(writtenShoppingList.length, 1);
