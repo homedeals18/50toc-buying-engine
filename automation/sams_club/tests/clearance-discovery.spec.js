@@ -86,23 +86,81 @@ async function setClubLocationIfAvailable(page) {
   return { clubLocation: config.clubLocation, clubZipCode: config.clubZipCode, locationTextSeen: /Secaucus|07094/i.test(await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '')) };
 }
 
+async function clickAndCheck(page, locator, label) {
+  await failIfBlocked(page, `${label}-before-click`);
+  await Promise.all([
+    page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => undefined),
+    locator.click({ timeout: 10_000 })
+  ]);
+  await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
+  await failIfBlocked(page, label);
+}
+
+async function findVisibleNavigationLink(page, pattern, timeout = 3_000) {
+  const link = page.locator('a, button, [role="menuitem"], [role="link"], [role="button"]').filter({ hasText: pattern }).first();
+  return (await link.isVisible({ timeout }).catch(() => false)) ? link : null;
+}
+
+async function openSavingsNavigation(page) {
+  const directSavingsLink = await findVisibleNavigationLink(page, /\b(Savings|Deals|Offers)\b/i, 8_000);
+  if (directSavingsLink) {
+    await clickAndCheck(page, directSavingsLink, 'savings-link');
+    return 'direct-savings-link';
+  }
+
+  const menuTriggers = [
+    /All\s+(Departments|Categories)/i,
+    /Departments|Categories|Shop/i,
+    /Menu/i
+  ];
+  for (const pattern of menuTriggers) {
+    const trigger = await findVisibleNavigationLink(page, pattern, 3_000);
+    if (!trigger) continue;
+    await trigger.click({ timeout: 10_000 }).catch(() => undefined);
+    await page.waitForTimeout(1_000);
+    await failIfBlocked(page, 'navigation-menu');
+    const nestedSavingsLink = await findVisibleNavigationLink(page, /\b(Savings|Deals|Offers)\b/i, 3_000);
+    if (nestedSavingsLink) {
+      await clickAndCheck(page, nestedSavingsLink, 'savings-menu-link');
+      return 'nested-savings-menu-link';
+    }
+  }
+
+  throw new Error("Unable to locate Sam's Club Savings through live homepage navigation without using search.");
+}
+
+async function navigateFromSavingsToClearance(page) {
+  const clearancePatterns = [/\bClearance\b/i, /\bLast\s+Chance\b/i, /\bCloseout/i];
+  for (const pattern of clearancePatterns) {
+    const clearanceLink = await findVisibleNavigationLink(page, pattern, 5_000);
+    if (clearanceLink) {
+      await clickAndCheck(page, clearanceLink, 'clearance-link');
+      return { dealSourceName: config.dealSource.name, clearanceFound: true };
+    }
+  }
+
+  const filters = page.locator('label, button, a').filter({ hasText: /\bClearance\b/i }).first();
+  if (await filters.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await clickAndCheck(page, filters, 'clearance-filter');
+    return { dealSourceName: config.dealSource.name, clearanceFound: true };
+  }
+
+  return { dealSourceName: config.fallbackDealSource.name, clearanceFound: false };
+}
+
 async function navigateToClearance(page) {
   await gotoAndCheck(page, '/', { waitUntil: 'domcontentloaded', timeout: 60_000 }, 'homepage');
   await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
   const location = await setClubLocationIfAvailable(page);
-  const clearanceLink = page.locator('a, button').filter({ hasText: /clearance/i }).first();
-  if (await clearanceLink.isVisible({ timeout: 8_000 }).catch(() => false)) {
-    await Promise.all([page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => undefined), clearanceLink.click({ timeout: 10_000 })]);
-  } else {
-    const searchBox = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i], form[role="search"] input').first();
-    if (!(await searchBox.isVisible({ timeout: 10_000 }).catch(() => false))) throw new Error("Unable to find Sam's Club search input for Clearance.");
-    await searchBox.fill(config.dealSource.searchTerm);
-    await Promise.all([page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => undefined), searchBox.press('Enter')]);
-  }
+  const savingsNavigationMethod = await openSavingsNavigation(page);
+  const savingsUrl = page.url();
+  await saveStep(page, '01-sams-club-savings', { location, savingsNavigationMethod });
+  const source = await navigateFromSavingsToClearance(page);
   await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
-  await failIfBlocked(page, 'clearance');
-  await saveStep(page, '01-sams-club-clearance', { location });
-  return { discoveredUrl: page.url(), location };
+  await failIfBlocked(page, source.clearanceFound ? 'clearance' : 'savings');
+  await saveStep(page, source.clearanceFound ? '02-sams-club-clearance' : '02-sams-club-savings-fallback', { location, savingsNavigationMethod, savingsUrl, ...source });
+  if (/\/search\?q=clearance/i.test(page.url())) throw new Error(`Sam's Club connector reached forbidden clearance search URL: ${page.url()}`);
+  return { discoveredUrl: page.url(), savingsUrl, location, ...source };
 }
 
 async function loadMoreProductsIfAvailable(page) {
@@ -241,10 +299,10 @@ function unifiedDeal(product) {
   return { supplier: product.supplier ?? config.supplier, dealSource: product.dealSource ?? config.dealSource.name, category: product.category ?? null, productName: product.productName ?? null, brand: product.brand ?? null, sku: product.sku ?? null, upc: product.upc ?? null, packageSize: product.packageSize ?? null, currentPrice: product.currentPrice ?? null, originalPrice: product.originalPrice ?? null, discount: product.discount ?? null, coupon: product.coupon ?? null, availability: product.availability ?? null, quantityLimit: product.quantityLimit ?? null, productUrl: product.productUrl ?? null, imageUrl: product.imageUrl ?? null, scanDate: product.scanDate ?? new Date().toISOString() };
 }
 
-async function extractListingProducts(page) {
+async function extractListingProducts(page, dealSourceName = config.dealSource.name) {
   await loadMoreProductsIfAvailable(page);
   for (let i = 0; i < 2; i += 1) { await page.mouse.wheel(0, 1800).catch(() => undefined); await page.waitForTimeout(750); }
-  return page.evaluate(productTileExtractorScript, { dealSourceName: config.dealSource.name, relevantSources: config.relevantCategoryPatterns.map((p) => p.source), excludedSource: config.excludedCategoryPattern.source, varietySource: varietyPackPattern.source, filterAllowed: false, maxProducts: config.maxProducts });
+  return page.evaluate(productTileExtractorScript, { dealSourceName, relevantSources: config.relevantCategoryPatterns.map((p) => p.source), excludedSource: config.excludedCategoryPattern.source, varietySource: varietyPackPattern.source, filterAllowed: false, maxProducts: config.maxProducts });
 }
 
 async function visibleProductGridText(page) {
@@ -294,10 +352,10 @@ test.describe("Sam's Club clearance shopping list intelligence", () => {
     const consoleMessages = [];
     page.on('console', (message) => consoleMessages.push({ type: message.type(), text: message.text() }));
     page.on('pageerror', (error) => consoleMessages.push({ type: 'pageerror', text: error.message }));
-    const { discoveredUrl, location } = await navigateToClearance(page);
+    const { discoveredUrl, savingsUrl, location, dealSourceName, clearanceFound } = await navigateToClearance(page);
     const listingScreenshots = [];
     for (let i = 0; i < config.maxListingScreenshots; i += 1) { listingScreenshots.push(await saveStep(page, `01-clearance-listing-page-${i + 1}`)); await page.mouse.wheel(0, 1400).catch(() => undefined); await page.waitForTimeout(750); }
-    const listingProducts = await extractListingProducts(page);
+    const listingProducts = await extractListingProducts(page, dealSourceName);
     if (listingProducts.length === 0) {
       const debug = await saveZeroProductDebug(page);
       throw new Error(`Sam's Club Clearance had no detected visible product tiles. DOM debug saved to ${debug.jsonPath} and ${debug.htmlPath}.`);
@@ -315,6 +373,6 @@ test.describe("Sam's Club clearance shopping list intelligence", () => {
       else rejectedProducts.push({ product: enrichedProduct, reasons: rejectionReasons });
     }
     const evaluatedProducts = await saveProgress(products);
-    await writeFile(path.join(logDir, 'deal-execution-report.json'), JSON.stringify({ connector: config.supplier, sourceReports: [{ dealSource: config.dealSource.name, discoveredUrl, productCount: products.length, scrapedProductLimit: config.maxProducts, skippedByLimitCount: Math.max(listingProducts.length - config.maxProducts, 0), listingScreenshots }], productCount: products.length, rejectedProducts: rejectedProducts.map(({ product, reasons }) => ({ productName: product.productName, sku: product.sku, productUrl: product.productUrl, rejectionReasons: reasons })), outputs: { dealProducts: dealProductsPath, shoppingListReport: shoppingListReportPath }, businessRules: { global50TocRules: true, clearanceOnly: true, regularCatalogPagesScraped: false, clubLocation: config.clubLocation, location, didLogin: false, usedPassword: false, usedMembershipAuthentication: false, didAddToCart: false, didCheckout: false, didPurchase: false, maxProductsConfig: 'SAMS_CLUB_MAX_CLEARANCE_PRODUCTS' }, categories: { allowed: config.relevantCategoryPatterns.map((pattern) => pattern.source), excluded: config.excludedCategoryPattern.source }, evaluatedProductCount: evaluatedProducts.length, screenshotsDirectory: screenshotDir, logsDirectory: logDir, consoleMessages, completedAt: new Date().toISOString() }, null, 2));
+    await writeFile(path.join(logDir, 'deal-execution-report.json'), JSON.stringify({ connector: config.supplier, sourceReports: [{ dealSource: dealSourceName, clearanceFound, savingsUrl, discoveredUrl, productCount: products.length, scrapedProductLimit: config.maxProducts, skippedByLimitCount: Math.max(listingProducts.length - config.maxProducts, 0), listingScreenshots }], productCount: products.length, rejectedProducts: rejectedProducts.map(({ product, reasons }) => ({ productName: product.productName, sku: product.sku, productUrl: product.productUrl, rejectionReasons: reasons })), outputs: { dealProducts: dealProductsPath, shoppingListReport: shoppingListReportPath }, businessRules: { global50TocRules: true, clearanceOnly: clearanceFound, savingsFallbackUsed: !clearanceFound, regularCatalogPagesScraped: false, clubLocation: config.clubLocation, location, didLogin: false, usedPassword: false, usedMembershipAuthentication: false, didAddToCart: false, didCheckout: false, didPurchase: false, maxProductsConfig: 'SAMS_CLUB_MAX_CLEARANCE_PRODUCTS' }, categories: { allowed: config.relevantCategoryPatterns.map((pattern) => pattern.source), excluded: config.excludedCategoryPattern.source }, evaluatedProductCount: evaluatedProducts.length, screenshotsDirectory: screenshotDir, logsDirectory: logDir, consoleMessages, completedAt: new Date().toISOString() }, null, 2));
   });
 });

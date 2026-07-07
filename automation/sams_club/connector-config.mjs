@@ -4,8 +4,10 @@ export const samsClubConnectorConfig = {
   clubLocation: 'Secaucus, NJ 07094',
   clubZipCode: '07094',
   dealSource: {
-    name: 'Clearance',
-    searchTerm: 'clearance'
+    name: 'Clearance'
+  },
+  fallbackDealSource: {
+    name: 'Savings'
   },
   maxProducts: Number(process.env.SAMS_CLUB_MAX_CLEARANCE_PRODUCTS ?? 10),
   maxListingScreenshots: Number(process.env.SAMS_CLUB_MAX_LISTING_SCREENSHOTS ?? 2),
