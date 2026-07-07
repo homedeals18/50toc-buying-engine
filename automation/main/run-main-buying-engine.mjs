@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,23 +96,33 @@ function toOffer(product, connector) {
   };
 }
 
+function resolveDealProductsPath(relativePath) {
+  const repoRoot = process.cwd();
+  const resolvedDealProductsPath = path.resolve(repoRoot, relativePath);
+  return {
+    repoRoot,
+    resolvedDealProductsPath,
+    exists: existsSync(resolvedDealProductsPath)
+  };
+}
+
 async function loadConnectorProducts(connector) {
-  const dealProductsPath = path.resolve(connector.dealProductsPath);
-  let raw;
-  try {
-    raw = await readFile(dealProductsPath, 'utf8');
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      const missingError = new Error(`Missing ${connector.name} deal-products.json at ${toProjectRelativePath(dealProductsPath)}`);
-      missingError.code = 'MISSING_DEAL_PRODUCTS';
-      missingError.isWarning = true;
-      throw missingError;
-    }
-    throw error;
+  const pathDebug = resolveDealProductsPath(connector.dealProductsPath);
+  if (!pathDebug.exists) {
+    const missingError = new Error(`Missing ${connector.name} deal-products.json at ${toProjectRelativePath(pathDebug.resolvedDealProductsPath)}`);
+    missingError.code = 'MISSING_DEAL_PRODUCTS';
+    missingError.isWarning = true;
+    missingError.pathDebug = pathDebug;
+    throw missingError;
   }
+
+  const raw = await readFile(pathDebug.resolvedDealProductsPath, 'utf8');
   const parsed = JSON.parse(raw);
   if (!Array.isArray(parsed)) throw new Error(`${connector.name} deal-products.json must contain an array`);
-  return parsed.map((product) => ({ ...product, supplier: product.supplier ?? connector.name }));
+  return {
+    products: parsed.map((product) => ({ ...product, supplier: product.supplier ?? connector.name })),
+    pathDebug
+  };
 }
 
 export async function loadEnabledConnectorProducts(connectors = defaultConnectorRegistry) {
@@ -120,25 +131,32 @@ export async function loadEnabledConnectorProducts(connectors = defaultConnector
 
   for (const connector of connectors.filter((entry) => entry.enabled !== false)) {
     try {
-      const products = await loadConnectorProducts(connector);
+      const { products, pathDebug } = await loadConnectorProducts(connector);
       loaded.push(...products.map((product) => ({ product, connector })));
       connectorReports.push({
         connectorId: connector.id,
         connectorName: connector.name,
         status: 'loaded',
         severity: 'info',
-        dealProductsPath: toProjectRelativePath(path.resolve(connector.dealProductsPath)),
+        dealProductsPath: toProjectRelativePath(pathDebug.resolvedDealProductsPath),
+        repoRoot: pathDebug.repoRoot,
+        resolvedDealProductsPath: pathDebug.resolvedDealProductsPath,
+        exists: pathDebug.exists,
         productCount: products.length,
         message: `Loaded ${products.length} products from ${connector.name}`
       });
     } catch (error) {
       const isMissingDealProducts = error.code === 'MISSING_DEAL_PRODUCTS';
+      const pathDebug = error.pathDebug ?? resolveDealProductsPath(connector.dealProductsPath);
       connectorReports.push({
         connectorId: connector.id,
         connectorName: connector.name,
         status: isMissingDealProducts ? 'missing' : 'failed',
         severity: isMissingDealProducts ? 'warning' : 'error',
-        dealProductsPath: toProjectRelativePath(path.resolve(connector.dealProductsPath)),
+        dealProductsPath: toProjectRelativePath(pathDebug.resolvedDealProductsPath),
+        repoRoot: pathDebug.repoRoot,
+        resolvedDealProductsPath: pathDebug.resolvedDealProductsPath,
+        exists: pathDebug.exists,
         productCount: 0,
         warning: isMissingDealProducts ? error.message : undefined,
         error: isMissingDealProducts ? undefined : error.message,
