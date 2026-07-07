@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { loadEnabledConnectorProducts, mergeProducts, resolveProjectPath } from './run-main-buying-engine.mjs';
+import { loadEnabledConnectorProducts, mergeProducts, resolveProjectPath, runMainBuyingEngine } from './run-main-buying-engine.mjs';
 
 const bjs = { id: 'bjs', name: "BJ's Wholesale Club" };
 const costco = { id: 'costco_business_center', name: 'Costco Business Center' };
@@ -33,10 +33,20 @@ test('mergeProducts falls back to brand, product name, and package size when UPC
 });
 
 test('resolveProjectPath resolves connector artifacts from the current project root', () => {
-  assert.equal(resolveProjectPath('artifacts', 'bjs', 'logs', 'deal-products.json'), path.join(process.cwd(), 'artifacts', 'bjs', 'logs', 'deal-products.json'));
+  assert.equal(resolveProjectPath('artifacts', 'bjs', 'logs', 'deal-products.json'), path.resolve('artifacts', 'bjs', 'logs', 'deal-products.json'));
 });
 
-test('loadEnabledConnectorProducts loads available connector outputs and reports the resolved missing path', async () => {
+test('resolveProjectPath is stable when the process is launched from a subdirectory', async () => {
+  const originalCwd = process.cwd();
+  try {
+    process.chdir(path.join(originalCwd, 'automation', 'main'));
+    assert.equal(resolveProjectPath('artifacts', 'costco_business_center', 'logs', 'deal-products.json'), path.join(originalCwd, 'artifacts', 'costco_business_center', 'logs', 'deal-products.json'));
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test('loadEnabledConnectorProducts loads available connector outputs and reports the resolved missing path as a warning', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'main-buying-engine-'));
   const bjsDealProductsPath = path.join(tempRoot, 'artifacts', 'bjs', 'logs', 'deal-products.json');
   const missingCostcoDealProductsPath = path.join(tempRoot, 'artifacts', 'costco_business_center', 'logs', 'deal-products.json');
@@ -53,7 +63,32 @@ test('loadEnabledConnectorProducts loads available connector outputs and reports
   assert.equal(loaded[0].product.supplier, bjs.name);
 
   const costcoReport = connectorReports.find((report) => report.connectorId === costco.id);
-  assert.equal(costcoReport.status, 'missing_or_failed');
+  assert.equal(costcoReport.status, 'missing');
+  assert.equal(costcoReport.severity, 'warning');
   assert.equal(costcoReport.dealProductsPath, missingCostcoDealProductsPath);
-  assert.match(costcoReport.error, new RegExp(`Missing Costco Business Center deal-products\\.json at ${missingCostcoDealProductsPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.match(costcoReport.warning, new RegExp(`Missing Costco Business Center deal-products\\.json at ${missingCostcoDealProductsPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+});
+
+
+test("runMainBuyingEngine preserves Costco products when BJ's deal-products.json is missing", async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'main-buying-engine-costco-'));
+  const missingBjsDealProductsPath = path.join(tempRoot, 'artifacts', 'bjs', 'logs', 'deal-products.json');
+  const costcoDealProductsPath = path.join(tempRoot, 'artifacts', 'costco_business_center', 'logs', 'deal-products.json');
+  await mkdir(path.dirname(costcoDealProductsPath), { recursive: true });
+  await writeFile(costcoDealProductsPath, JSON.stringify([{ supplier: 'Costco Business Center', productName: 'Costco Product', brand: 'Kirkland', packageSize: '12 ct', currentPrice: '$12.99' }]));
+
+  const { finalProducts, report } = await runMainBuyingEngine([
+    { ...bjs, enabled: true, dealProductsPath: missingBjsDealProductsPath },
+    { ...costco, enabled: true, dealProductsPath: costcoDealProductsPath }
+  ]);
+
+  assert.equal(finalProducts.length, 1);
+  assert.equal(finalProducts[0].productName, 'Costco Product');
+  assert.equal(finalProducts[0].offers[0].storeId, 'costco_business_center');
+  assert.equal(report.totals.loadedProducts, 1);
+  assert.equal(report.connectors.find((connector) => connector.connectorId === 'bjs').severity, 'warning');
+
+  const writtenShoppingList = JSON.parse(await readFile(resolveProjectPath('artifacts', 'main', 'final-shopping-list.json'), 'utf8'));
+  assert.equal(writtenShoppingList.length, 1);
+  assert.equal(writtenShoppingList[0].productName, 'Costco Product');
 });

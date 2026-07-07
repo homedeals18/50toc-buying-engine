@@ -1,7 +1,8 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-export const repositoryRoot = path.resolve(process.cwd());
+export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const mainArtifactRoot = path.join(repositoryRoot, 'artifacts/main');
 const finalShoppingListPath = path.join(mainArtifactRoot, 'final-shopping-list.json');
 const finalExecutionReportPath = path.join(mainArtifactRoot, 'final-execution-report.json');
@@ -88,7 +89,10 @@ async function loadConnectorProducts(connector) {
     raw = await readFile(dealProductsPath, 'utf8');
   } catch (error) {
     if (error.code === 'ENOENT') {
-      throw new Error(`Missing ${connector.name} deal-products.json at ${dealProductsPath}`);
+      const missingError = new Error(`Missing ${connector.name} deal-products.json at ${dealProductsPath}`);
+      missingError.code = 'MISSING_DEAL_PRODUCTS';
+      missingError.isWarning = true;
+      throw missingError;
     }
     throw error;
   }
@@ -109,17 +113,25 @@ export async function loadEnabledConnectorProducts(connectors = defaultConnector
         connectorId: connector.id,
         connectorName: connector.name,
         status: 'loaded',
+        severity: 'info',
         dealProductsPath: path.resolve(connector.dealProductsPath),
-        productCount: products.length
+        productCount: products.length,
+        message: `Loaded ${products.length} products from ${connector.name}`
       });
     } catch (error) {
+      const isMissingDealProducts = error.code === 'MISSING_DEAL_PRODUCTS';
       connectorReports.push({
         connectorId: connector.id,
         connectorName: connector.name,
-        status: 'missing_or_failed',
+        status: isMissingDealProducts ? 'missing' : 'failed',
+        severity: isMissingDealProducts ? 'warning' : 'error',
         dealProductsPath: path.resolve(connector.dealProductsPath),
         productCount: 0,
-        error: error.message
+        warning: isMissingDealProducts ? error.message : undefined,
+        error: isMissingDealProducts ? undefined : error.message,
+        message: isMissingDealProducts
+          ? `Warning: ${error.message}`
+          : `Failed to load ${connector.name}: ${error.message}`
       });
     }
   }
@@ -193,6 +205,10 @@ export function buildExecutionReport({ connectorReports, finalProducts }) {
 export async function runMainBuyingEngine(connectors = defaultConnectorRegistry) {
   await mkdir(mainArtifactRoot, { recursive: true });
   const { loaded, connectorReports } = await loadEnabledConnectorProducts(connectors);
+  for (const connectorReport of connectorReports) {
+    const logger = connectorReport.severity === 'warning' ? console.warn : connectorReport.severity === 'error' ? console.error : console.log;
+    logger(`[Main Buying Engine] ${connectorReport.message}`);
+  }
   const finalProducts = mergeProducts(loaded);
   const report = buildExecutionReport({ connectorReports, finalProducts });
   await writeFile(finalShoppingListPath, JSON.stringify(finalProducts, null, 2));
