@@ -55,6 +55,17 @@ npm install
 npm run dev
 ```
 
+
+## Standard development pipeline
+
+Run the full local development workflow from the repository root:
+
+```bash
+npm run dev:all
+```
+
+The development pipeline verifies the Git working tree, creates required artifact folders when needed, runs enabled store connectors, runs the Main Buying Engine, validates generated JSON artifacts, and prints a colored final summary. BJ's and Costco Business Center connectors are enabled by default. Disable either connector for a faster local run by setting `BJS_CONNECTOR_ENABLED=false` or `COSTCO_BUSINESS_CENTER_CONNECTOR_ENABLED=false`. Connector failures are reported in the final summary while the remaining workflow continues; the command exits non-zero only when the Main Buying Engine cannot complete.
+
 ## Store connectors
 
 Store integrations should implement `StoreConnector` from `backend/app/connectors/base/client.py` inside their own connector package. Local Playwright automation currently exists for BJ's and Costco Business Center shopping-list intelligence workflows.
