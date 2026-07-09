@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { extractRevsellerFields, amazonMatchQuery } from './revseller-integration.mjs';
+import { amazonMatchQuery, extractAmazonProductFromPage, extractRevsellerFields } from './revseller-integration.mjs';
 
 test('extracts RevSeller panel fields without calculating profitability', () => {
   const result = extractRevsellerFields({
@@ -19,6 +19,14 @@ test('extracts RevSeller panel fields without calculating profitability', () => 
 });
 
 test('builds reusable Amazon match query from connector product fields', () => {
-  assert.equal(amazonMatchQuery({ brand: 'Brand', productName: 'Product', packageSize: '12 ct' }), 'Brand Product 12 ct');
+  assert.equal(amazonMatchQuery({ brand: 'Brand', productName: 'Product', packageSize: '12 ct', count: '12 pack' }), 'Brand Product 12 ct 12 pack');
   assert.equal(amazonMatchQuery({ asin: 'B000000001' }), 'B000000001');
+  assert.equal(amazonMatchQuery({ productUrl: 'https://www.costcobusinessdelivery.com/item' }), '');
+});
+
+test('maps Amazon page data into a matching candidate before RevSeller reads', () => {
+  const candidate = extractAmazonProductFromPage({ asin: 'B000000001', title: 'Brand Product 12 ct', brand: 'Brand', upc: '000111222333', packageSize: '12 ct', count: '12 ct', price: '$19.99', productUrl: 'https://www.amazon.com/dp/B000000001' });
+  assert.equal(candidate.asin, 'B000000001');
+  assert.equal(candidate.title, 'Brand Product 12 ct');
+  assert.equal(candidate.currentSellingPrice, '$19.99');
 });

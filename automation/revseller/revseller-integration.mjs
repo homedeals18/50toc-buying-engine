@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { redactSensitiveText } from './connector-config.mjs';
+import { confidenceRules, matchProductToAmazon } from '../shared/amazon-matching-engine.mjs';
 
 export const amazonAnalysisReportPath = path.resolve(process.cwd(), '../../artifacts/amazon/revseller-analysis-report.json');
 
@@ -60,7 +61,41 @@ export async function readConnectorProductsFromJsonFile(filePath) {
 }
 
 export function amazonMatchQuery(product) {
-  return product?.amazonUrl || product?.productUrl || product?.url || product?.asin || product?.upc || [product?.brand, product?.productName, product?.packageSize].filter(Boolean).join(' ');
+  if (product?.amazonUrl) return product.amazonUrl;
+  if (product?.url && /amazon\.com/i.test(product.url)) return product.url;
+  if (product?.asin || product?.amazonAsin) return product.asin || product.amazonAsin;
+  if (product?.upc) return product.upc;
+  return [product?.brand, product?.productName, product?.packageSize, product?.count].filter(Boolean).join(' ');
+}
+
+export function extractAmazonProductFromPage(pageData) {
+  return {
+    asin: pageData.asin,
+    title: pageData.title,
+    productName: pageData.title,
+    brand: pageData.brand,
+    upc: pageData.upc,
+    packageSize: pageData.packageSize,
+    count: pageData.count,
+    currentSellingPrice: pageData.price,
+    productUrl: pageData.productUrl
+  };
+}
+
+export async function readAmazonProductPageData(page) {
+  return page.evaluate(() => {
+    const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
+    const text = clean(document.body?.innerText) || '';
+    const bySelector = (selector) => clean(document.querySelector(selector)?.textContent);
+    const asin = location.href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.[1] || document.querySelector('[name="ASIN"]')?.value || null;
+    const title = bySelector('#productTitle') || clean(document.title?.replace(/Amazon.com\s*:?\s*/i, ''));
+    const brand = bySelector('#bylineInfo')?.replace(/^Brand:\s*/i, '').replace(/^Visit the\s+/i, '').replace(/\s+Store$/i, '') || null;
+    const price = bySelector('.a-price .a-offscreen, #corePriceDisplay_desktop_feature_div .a-offscreen, #priceblock_ourprice, #priceblock_dealprice');
+    const upc = text.match(/\b(?:UPC|GTIN|EAN)\s*[:#-]?\s*([0-9-]{8,14})\b/i)?.[1] || null;
+    const packageSize = text.match(/\b\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|fl oz|ct|count|pack|pk|lb|lbs|gallon|gal|qt)\b(?:\s*[xX]\s*\d+)?/i)?.[0] || null;
+    const count = text.match(/\b\d+\s*(?:ct|count|pack|pk)\b/i)?.[0] || null;
+    return { asin, title, brand, price, upc, packageSize, count, productUrl: location.href };
+  });
 }
 
 export async function openAmazonMatch(page, product) {
@@ -79,6 +114,20 @@ export async function openAmazonMatch(page, product) {
   }
   await page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => undefined);
   return page.url();
+}
+
+export async function openConfidentAmazonMatch(page, product) {
+  await openAmazonMatch(page, product);
+  const pageData = await readAmazonProductPageData(page);
+  const match = matchProductToAmazon(product, [extractAmazonProductFromPage(pageData)]);
+  const matched = match.confidenceScore >= confidenceRules.brandName;
+  return {
+    status: matched ? 'matched' : 'needs_review',
+    needsReview: !matched,
+    revsellerEligible: matched,
+    match: { ...match, amazonProductUrl: pageData.productUrl },
+    amazonPageData: pageData
+  };
 }
 
 export async function readRevsellerPanel(page) {
