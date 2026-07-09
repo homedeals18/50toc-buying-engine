@@ -1,0 +1,17 @@
+{
+  "engineName": "decision-engine-v1",
+  "rules": {
+    "amazonMinimumMatchConfidence": 80
+  },
+  "thresholds": {
+    "minimumRoiPercent": 30,
+    "minimumProfit": 3,
+    "maximumPurchasePrice": 100,
+    "maximumBsr": 150000
+  },
+  "confidence": {
+    "buy": 95,
+    "dontBuy": 90,
+    "needsReview": 60
+  }
+}

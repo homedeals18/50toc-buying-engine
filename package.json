@@ -12,6 +12,7 @@
     "scrape:revseller": "npm --prefix automation/revseller run scrape:revseller",
     "test:revseller-config": "npm --prefix automation/revseller run unit",
     "run:amazon-product-discovery": "node automation/shared/amazon-product-discovery.mjs",
-    "read:revseller": "npm --prefix automation/revseller run read:open-page"
+    "read:revseller": "npm --prefix automation/revseller run read:open-page",
+    "run:decision-engine": "node automation/decision-engine/decision-engine.mjs"
   }
 }
