@@ -159,3 +159,28 @@ npm run scrape:bjs:deals:manual-chrome
 ```
 
 The launcher stores the dedicated manual Chrome profile under `artifacts/bjs/manual-chrome-profile` by default. Override it with `BJS_MANUAL_CHROME_PROFILE_DIR` if you want to reuse a different profile folder. The manual script connects to `http://127.0.0.1:9222` by default; override it with `BJS_CHROME_CDP_ENDPOINT` if you use a different host or port. To connect to a Chrome instance that you already started yourself, set `BJS_SKIP_CHROME_LAUNCH=true` and make sure that Chrome was started with a matching `--remote-debugging-port`. The normal Playwright launch mode remains available as the fallback with `./scripts/run-bjs-deals-test.sh`.
+
+## RevSeller local integration
+
+The RevSeller integration uses a persistent local Playwright browser profile at `artifacts/revseller/profile` so the operator can authenticate once and reuse that authenticated session on later runs. Credentials must be supplied through local environment variables and must never be committed:
+
+```bash
+export REVSELLER_EMAIL="operator@example.com"
+export REVSELLER_PASSWORD="use-a-local-secret"
+```
+
+Run the integration from the repository root:
+
+```bash
+npm run scrape:revseller
+```
+
+If the persistent profile is not already authenticated, the automation first attempts login with `REVSELLER_EMAIL` and `REVSELLER_PASSWORD` when both are set. If that does not establish an authenticated session, it opens the browser headed and prompts the operator to complete RevSeller login manually once. The saved browser profile is reused for future runs.
+
+Authenticated RevSeller data is read only after the session check succeeds. To collect product-page RevSeller data, provide comma-separated Amazon product URLs:
+
+```bash
+REVSELLER_AMAZON_PRODUCT_URLS="https://www.amazon.com/dp/XXXXXXXXXX,https://www.amazon.com/dp/YYYYYYYYYY" npm run scrape:revseller
+```
+
+The integration writes sanitized JSON reports under `artifacts/revseller/logs`. It does not take screenshots, and the artifact paths are ignored by Git so credentials, cookies, session state, logs, and generated reports are not committed.

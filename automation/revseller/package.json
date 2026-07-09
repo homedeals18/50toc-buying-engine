@@ -1,0 +1,15 @@
+{
+  "name": "revseller-automation-local",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "scrape:revseller": "playwright test tests/revseller-authenticated-data.spec.js --project=chromium",
+    "unit": "node --test connector-config.test.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "latest",
+    "playwright": "latest"
+  }
+}
