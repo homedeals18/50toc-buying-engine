@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import {
   buildAmazonSearchQuery,
   discoverAmazonProduct,
+  fetchAmazonPageTextWithBrowserSession,
   extractAsinFromUrl,
   parseAmazonProductPage,
   parseAmazonSearchResults,
@@ -56,6 +57,24 @@ test('parseAmazonProductPage extracts required discovery fields', () => {
   assert.equal(product.packageSize, '24 ct');
 });
 
+
+
+test('fetchAmazonPageTextWithBrowserSession opens pages through the shared browser page', async () => {
+  const visited = [];
+  const page = {
+    async goto(url, options) {
+      visited.push({ url, options });
+    },
+    async content() {
+      return productHtml;
+    }
+  };
+
+  const html = await fetchAmazonPageTextWithBrowserSession('https://www.amazon.com/dp/B000BEST22', { page });
+  assert.equal(html, productHtml);
+  assert.deepEqual(visited, [{ url: 'https://www.amazon.com/dp/B000BEST22', options: { waitUntil: 'domcontentloaded', timeout: 60_000 } }]);
+});
+
 test('discoverAmazonProduct searches, opens best product page, and stores Amazon product mapping', async () => {
   const visited = [];
   const discovery = await discoverAmazonProduct(
@@ -74,6 +93,28 @@ test('discoverAmazonProduct searches, opens best product page, and stores Amazon
   assert.equal(discovery.matched, true);
   assert.equal(discovery.amazonProduct.asin, 'B000BEST22');
   assert.equal(discovery.amazonProduct.currentPrice, '$29.99');
+});
+
+
+
+test('discoverAmazonProduct can browse with an existing shared browser page instead of creating a separate fetch client', async () => {
+  const visited = [];
+  const page = {
+    async goto(url) {
+      visited.push(url);
+    },
+    async content() {
+      return visited.at(-1).includes('/s?') ? searchHtml : productHtml;
+    }
+  };
+
+  const discovery = await discoverAmazonProduct(
+    { brand: 'Acme', productName: 'Protein Bars Chocolate', packageSize: '24 ct' },
+    { page }
+  );
+
+  assert.deepEqual(visited, ['https://www.amazon.com/s?k=Acme%20Protein%20Bars%20Chocolate%2024%20ct', 'https://www.amazon.com/dp/B000BEST22']);
+  assert.equal(discovery.amazonProduct.asin, 'B000BEST22');
 });
 
 test('runAmazonProductDiscovery writes artifacts/amazon/product-discovery.json compatible report', async () => {

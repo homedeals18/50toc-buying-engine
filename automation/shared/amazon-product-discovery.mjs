@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getAmazonBrowserPage } from '../amazon/browser-session/index.mjs';
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const defaultProductDiscoveryPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'product-discovery.json');
@@ -108,20 +109,22 @@ export function selectBestAmazonCandidate(product, candidates) {
   return [...candidates].map((candidate) => ({ ...candidate, matchScore: scoreCandidate(product, candidate) })).sort((a, b) => b.matchScore - a.matchScore)[0] ?? null;
 }
 
-async function defaultFetchText(url) {
-  const response = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 AppleWebKit/537.36 Chrome/125 Safari/537.36', 'accept-language': 'en-US,en;q=0.9' } });
-  if (!response.ok) throw new Error(`Amazon request failed ${response.status} for ${url}`);
-  return response.text();
+export async function fetchAmazonPageTextWithBrowserSession(url, { page } = {}) {
+  const browserPage = page ?? await getAmazonBrowserPage();
+  await browserPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  return browserPage.content();
 }
 
-export async function discoverAmazonProduct(product, { fetchText = defaultFetchText } = {}) {
+export async function discoverAmazonProduct(product, { fetchText, page } = {}) {
   const searchQuery = buildAmazonSearchQuery(product);
   const searchUrl = `https://www.amazon.com/s?k=${encodeURIComponent(searchQuery)}`;
-  const searchHtml = await fetchText(searchUrl, { kind: 'search', product });
+  const browserPage = page ?? (!fetchText ? await getAmazonBrowserPage() : null);
+  const readPageText = fetchText ?? ((url) => fetchAmazonPageTextWithBrowserSession(url, { page: browserPage }));
+  const searchHtml = await readPageText(searchUrl, { kind: 'search', product });
   const candidates = parseAmazonSearchResults(searchHtml);
   const bestCandidate = selectBestAmazonCandidate(product, candidates);
   if (!bestCandidate) return { sourceProduct: product, searchQuery, searchUrl, matched: false, amazonProduct: null, candidates: [] };
-  const productHtml = await fetchText(bestCandidate.productUrl, { kind: 'product', product, candidate: bestCandidate });
+  const productHtml = await readPageText(bestCandidate.productUrl, { kind: 'product', product, candidate: bestCandidate });
   const amazonProduct = { ...bestCandidate, ...parseAmazonProductPage(productHtml, bestCandidate.productUrl) };
   return { sourceProduct: product, searchQuery, searchUrl, matched: Boolean(amazonProduct.asin), matchScore: bestCandidate.matchScore, amazonProduct };
 }
@@ -133,12 +136,13 @@ export async function readInputProducts(inputPath) {
   return parsed;
 }
 
-export async function runAmazonProductDiscovery({ inputPath, products, outputPath = defaultProductDiscoveryPath, fetchText } = {}) {
+export async function runAmazonProductDiscovery({ inputPath, products, outputPath = defaultProductDiscoveryPath, fetchText, page } = {}) {
   const resolvedInputPath = inputPath ?? defaultInputCandidates.find((candidate) => existsSync(candidate));
   if (!products && !resolvedInputPath) throw new Error('No inputPath provided and no default product artifact exists');
   const inputProducts = products ?? await readInputProducts(resolvedInputPath);
   const discoveries = [];
-  for (const product of inputProducts) discoveries.push(await discoverAmazonProduct(product, { fetchText }));
+  const browserPage = page ?? (!fetchText ? await getAmazonBrowserPage() : null);
+  for (const product of inputProducts) discoveries.push(await discoverAmazonProduct(product, { fetchText, page: browserPage }));
   const report = { engine: 'amazon-product-discovery-v1', generatedAt: new Date().toISOString(), inputPath: inputPath ? path.relative(repositoryRoot, inputPath) : null, totals: { inputProducts: inputProducts.length, matched: discoveries.filter((entry) => entry.matched).length, notMatched: discoveries.filter((entry) => !entry.matched).length }, discoveries };
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(report, null, 2));
