@@ -8,6 +8,8 @@
     "dev:all": "node automation/dev/run-dev-all.mjs",
     "dev:quick": "node automation/dev/run-dev-quick.mjs",
     "scrape:sams-club:clearance": "npm --prefix automation/sams_club run scrape:sams-club:clearance",
-    "run:amazon-matching-engine": "node automation/shared/amazon-matching-engine.mjs"
+    "run:amazon-matching-engine": "node automation/shared/amazon-matching-engine.mjs",
+    "scrape:revseller": "npm --prefix automation/revseller run scrape:revseller",
+    "test:revseller-config": "npm --prefix automation/revseller run unit"
   }
 }

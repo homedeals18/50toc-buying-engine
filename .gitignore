@@ -19,3 +19,10 @@ artifacts/bjs/logs/*
 !artifacts/bjs/logs/.gitkeep
 artifacts/bjs/screenshots/*
 !artifacts/bjs/screenshots/.gitkeep
+
+artifacts/revseller/*
+!artifacts/revseller/.gitkeep
+!artifacts/revseller/logs/
+!artifacts/revseller/logs/.gitkeep
+artifacts/revseller/logs/*
+!artifacts/revseller/logs/.gitkeep
