@@ -1,25 +1,21 @@
 import { chromium, expect, test as base } from '@playwright/test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { getRevsellerCredentials, redactSensitiveText, revsellerConnectorConfig as config } from '../connector-config.mjs';
+import { getRevsellerCredentials, revsellerConnectorConfig as config } from '../connector-config.mjs';
+import { amazonAnalysisReportPath, extractRevsellerFields, openAmazonMatch, readConnectorProductsFromJsonFile, readRevsellerPanel, writeRevsellerAnalysisReport } from '../revseller-integration.mjs';
 
 const artifactRoot = path.resolve(process.cwd(), '../../artifacts/revseller');
 const logDir = path.join(artifactRoot, 'logs');
 const profileDir = path.join(artifactRoot, 'profile');
-const revsellerDataPath = path.join(logDir, 'revseller-data.json');
 const authReportPath = path.join(logDir, 'auth-report.json');
 
 async function ensureArtifactDirs() {
   await Promise.all([mkdir(logDir, { recursive: true }), mkdir(profileDir, { recursive: true })]);
 }
 
-function sanitizeRecord(record) {
-  return JSON.parse(redactSensitiveText(JSON.stringify(record)));
-}
-
 async function writeSafeJson(filePath, data) {
   await ensureArtifactDirs();
-  await writeFile(filePath, JSON.stringify(sanitizeRecord(data), null, 2));
+  await writeRevsellerAnalysisReport(filePath, data);
 }
 
 const test = base.extend({
@@ -50,7 +46,7 @@ async function isAuthenticated(page) {
 
 async function loginWithEnvironmentCredentials(page) {
   const credentials = getRevsellerCredentials();
-  if (!credentials.hasCredentials) return { attempted: false, reason: 'REVSELLER_EMAIL and REVSELLER_PASSWORD are not both set' };
+  if (!credentials.hasCredentials) return { attempted: false, reason: 'REVSELLER_EMAIL and REVSELLER_PASSWORD are not both set in .env' };
 
   await page.goto(config.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.locator('input[type="email"], input[name*="email" i]').first().fill(credentials.email);
@@ -79,23 +75,21 @@ async function ensureAuthenticated(page) {
   return { status: 'authenticated', reusedSession: false, loginAttempt, manualLogin };
 }
 
-async function extractRevsellerDataFromAmazonPage(page, productUrl) {
-  await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+async function connectorProducts() {
+  const fileProducts = await readConnectorProductsFromJsonFile(config.connectorProductsPath);
+  const urlProducts = config.amazonProductUrls.map((amazonUrl) => ({ amazonUrl }));
+  return [...fileProducts, ...urlProducts].slice(0, config.maxProducts);
+}
+
+async function analyzeProduct(page, connectorProduct) {
+  await openAmazonMatch(page, connectorProduct);
   await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
-  await page.waitForTimeout(5_000);
-  const data = await page.evaluate(() => {
-    const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
-    const asin = location.href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.[1] || document.querySelector('[name="ASIN"]')?.value || null;
-    const revsellerNodes = [...document.querySelectorAll('[id*="revseller" i], [class*="revseller" i], iframe[src*="revseller" i]')];
-    return {
-      asin,
-      productUrl: location.href,
-      pageTitle: clean(document.title),
-      revsellerDetected: revsellerNodes.length > 0,
-      revsellerText: clean(revsellerNodes.map((node) => node.innerText || node.textContent || node.getAttribute('src')).filter(Boolean).join(' '))
-    };
-  });
-  return sanitizeRecord({ ...data, scannedAt: new Date().toISOString() });
+  const panel = await readRevsellerPanel(page);
+  return {
+    connectorProduct,
+    ...extractRevsellerFields(panel),
+    analyzedAt: new Date().toISOString()
+  };
 }
 
 test.describe('RevSeller authenticated integration', () => {
@@ -103,14 +97,14 @@ test.describe('RevSeller authenticated integration', () => {
     const auth = await ensureAuthenticated(page);
     await writeSafeJson(authReportPath, { connector: config.supplier, status: auth.status, reusedSession: auth.reusedSession, loginAttemptedWithEnvironmentCredentials: Boolean(auth.loginAttempt?.attempted), manualLoginPrompted: Boolean(auth.manualLogin?.prompted), completedAt: new Date().toISOString() });
 
-    const productUrls = config.amazonProductUrls.slice(0, config.maxProducts);
-    if (productUrls.length === 0) {
-      await writeSafeJson(revsellerDataPath, { connector: config.supplier, status: 'authenticated-no-products-configured', products: [], message: 'Set REVSELLER_AMAZON_PRODUCT_URLS to collect authenticated RevSeller data from Amazon product pages.', completedAt: new Date().toISOString() });
+    const productsToAnalyze = await connectorProducts();
+    if (productsToAnalyze.length === 0) {
+      await writeSafeJson(amazonAnalysisReportPath, { connector: config.supplier, status: 'authenticated-no-products-configured', products: [], message: 'Set REVSELLER_CONNECTOR_PRODUCTS_PATH or REVSELLER_AMAZON_PRODUCT_URLS to collect RevSeller data from Amazon product pages.', completedAt: new Date().toISOString() });
       return;
     }
 
     const products = [];
-    for (const productUrl of productUrls) products.push(await extractRevsellerDataFromAmazonPage(page, productUrl));
-    await writeSafeJson(revsellerDataPath, { connector: config.supplier, authenticated: true, productCount: products.length, products, completedAt: new Date().toISOString() });
+    for (const connectorProduct of productsToAnalyze) products.push(await analyzeProduct(page, connectorProduct));
+    await writeSafeJson(amazonAnalysisReportPath, { connector: config.supplier, authenticated: true, profitabilitySource: 'RevSeller', productCount: products.length, products, completedAt: new Date().toISOString() });
   });
 });

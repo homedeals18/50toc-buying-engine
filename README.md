@@ -162,25 +162,31 @@ The launcher stores the dedicated manual Chrome profile under `artifacts/bjs/man
 
 ## RevSeller local integration
 
-The RevSeller integration uses a persistent local Playwright browser profile at `artifacts/revseller/profile` so the operator can authenticate once and reuse that authenticated session on later runs. Credentials must be supplied through local environment variables and must never be committed:
+The RevSeller integration uses a persistent local Playwright browser profile at `artifacts/revseller/profile` so the operator can authenticate once and reuse that authenticated session on later runs. RevSeller credentials are read only from the repository-root `.env` file and must never be committed:
 
 ```bash
-export REVSELLER_EMAIL="operator@example.com"
-export REVSELLER_PASSWORD="use-a-local-secret"
+REVSELLER_EMAIL="operator@example.com"
+REVSELLER_PASSWORD="use-a-local-secret"
 ```
 
-Run the integration from the repository root:
+Run the RevSeller authenticated Amazon analysis from the repository root:
 
 ```bash
 npm run scrape:revseller
 ```
 
-If the persistent profile is not already authenticated, the automation first attempts login with `REVSELLER_EMAIL` and `REVSELLER_PASSWORD` when both are set. If that does not establish an authenticated session, it opens the browser headed and prompts the operator to complete RevSeller login manually once. The saved browser profile is reused for future runs.
+If the persistent profile is not already authenticated, the automation first attempts login with `REVSELLER_EMAIL` and `REVSELLER_PASSWORD` from `.env` when both are set. If that does not establish an authenticated session, it opens the browser headed and prompts the operator to complete RevSeller login manually once. The saved browser profile is reused for future runs.
 
-Authenticated RevSeller data is read only after the session check succeeds. To collect product-page RevSeller data, provide comma-separated Amazon product URLs:
+Authenticated RevSeller data is read only after the session check succeeds. The module is independent from BJ's, Costco, Sam's Club, and the Main Buying Engine. Future connectors can pass product records through a JSON file path, and the module will match each record to Amazon using `amazonUrl`, `productUrl`, `url`, `asin`, `upc`, or the combined `brand productName packageSize` fields:
+
+```bash
+REVSELLER_CONNECTOR_PRODUCTS_PATH="artifacts/some_connector/logs/deal-products.json" npm run scrape:revseller
+```
+
+For direct product-page analysis, provide comma-separated Amazon product URLs:
 
 ```bash
 REVSELLER_AMAZON_PRODUCT_URLS="https://www.amazon.com/dp/XXXXXXXXXX,https://www.amazon.com/dp/YYYYYYYYYY" npm run scrape:revseller
 ```
 
-The integration writes sanitized JSON reports under `artifacts/revseller/logs`. It does not take screenshots, and the artifact paths are ignored by Git so credentials, cookies, session state, logs, and generated reports are not committed.
+The integration reads profitability values from the RevSeller panel and does not calculate profitability manually when RevSeller data exists. It extracts ASIN, product title, current Amazon price, FBA fees, estimated profit, ROI, BSR, category, hazmat, meltable, IP alert, and variation fields when shown, then writes the sanitized report to `artifacts/amazon/revseller-analysis-report.json`. Auth status metadata remains under `artifacts/revseller/logs`; credentials, cookies, session state, logs, and generated reports are ignored by Git so secrets are not committed.

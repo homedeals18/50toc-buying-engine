@@ -1,3 +1,6 @@
+import { readFileSync, existsSync } from 'node:fs';
+import path from 'node:path';
+
 export const revsellerConnectorConfig = {
   supplier: 'RevSeller',
   baseUrl: 'https://revseller.com',
@@ -11,10 +14,30 @@ export const revsellerConnectorConfig = {
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean),
+  connectorProductsPath: process.env.REVSELLER_CONNECTOR_PRODUCTS_PATH || '',
   noSensitiveArtifacts: true
 };
 
-export function getRevsellerCredentials(env = process.env) {
+export function parseDotEnv(content = '') {
+  const values = {};
+  for (const rawLine of String(content).split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match) continue;
+    let value = match[2].trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    values[match[1]] = value;
+  }
+  return values;
+}
+
+export function readLocalDotEnv(envPath = path.resolve(process.cwd(), '../../.env')) {
+  if (!existsSync(envPath)) return {};
+  return parseDotEnv(readFileSync(envPath, 'utf8'));
+}
+
+export function getRevsellerCredentials(env = readLocalDotEnv()) {
   const email = String(env.REVSELLER_EMAIL ?? '').trim();
   const password = String(env.REVSELLER_PASSWORD ?? '');
   return {
@@ -22,11 +45,12 @@ export function getRevsellerCredentials(env = process.env) {
     password,
     hasEmail: email.length > 0,
     hasPassword: password.length > 0,
-    hasCredentials: email.length > 0 && password.length > 0
+    hasCredentials: email.length > 0 && password.length > 0,
+    source: '.env'
   };
 }
 
-export function redactSensitiveText(value, env = process.env) {
+export function redactSensitiveText(value, env = { ...process.env, ...readLocalDotEnv() }) {
   let output = String(value ?? '');
   for (const secret of [env.REVSELLER_EMAIL, env.REVSELLER_PASSWORD].filter(Boolean)) {
     output = output.split(String(secret)).join('[REDACTED]');
