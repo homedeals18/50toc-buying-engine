@@ -7,9 +7,11 @@ export const defaultMatchingReportPath = path.join(repositoryRoot, 'artifacts', 
 
 export const confidenceRules = Object.freeze({
   upc: 100,
-  asin: 100,
-  brandNamePackageSize: 95,
-  brandNameCount: 90,
+  asin: 98,
+  brandPackageCountPackageSizeFlavorName: 96,
+  brandPackageCountPackageSizeName: 92,
+  brandPackageCountPackageSize: 88,
+  brandPackageCount: 84,
   brandName: 80
 });
 
@@ -38,6 +40,85 @@ function formatMoney(value) {
 
 function tokenSet(value) {
   return new Set(normalized(value).replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean));
+}
+
+const varietyPackPattern = /\b(?:variety|assorted|assortment|mixed|multi[-\s]*flavo[u]?r|flavo[u]?r\s*variety|sampler)\b/i;
+const singleItemPattern = /\b(?:single|each|individual|1\s*(?:ct|count|pk|pack))\b/i;
+const multiPackPattern = /\b(?:multi[-\s]*pack|\d+\s*(?:ct|count|pk|pack)|pack\s*of\s*\d+)\b/i;
+const flavorWords = [
+  'apple', 'banana', 'berry', 'blueberry', 'caramel', 'cheddar', 'cherry', 'chocolate', 'cinnamon',
+  'classic', 'coconut', 'cola', 'cranberry', 'grape', 'honey', 'lemon', 'lime', 'mango', 'mint',
+  'orange', 'original', 'peach', 'peanut butter', 'raspberry', 'salted', 'strawberry', 'vanilla', 'watermelon'
+];
+
+function combinedText(product) {
+  return [product.productName, product.title, product.flavor, product.variant, product.packageSize, product.size, product.count, product.packageCount].filter(Boolean).join(' ');
+}
+
+function isVarietyPack(product) {
+  return varietyPackPattern.test(combinedText(product));
+}
+
+function packCount(product) {
+  const explicit = product.packageCount ?? product.packCount ?? product.count ?? product.packQuantity ?? product.packQty ?? product.quantity;
+  const text = [explicit, product.packageSize, product.size, product.productName, product.title].filter(Boolean).join(' ');
+  const match = text.match(/\b(?:pack\s*of\s*)?(\d+)\s*(?:ct|count|pk|pack)s?\b/i);
+  if (match) return Number(match[1]);
+  if (singleItemPattern.test(text)) return 1;
+  return null;
+}
+
+function packageSizeValue(product) {
+  const text = [product.packageSize, product.size, product.unitSize, product.productName, product.title].filter(Boolean).join(' ');
+  const match = text.match(/\b(\d+(?:\.\d+)?)\s*(fl\s*oz|fluid\s*ounces?|oz|ounces?|lb|lbs|pounds?|g|grams?|kg|ml|l|liters?)\b/i);
+  if (!match) return null;
+  const unit = match[2].toLowerCase().replace(/\s+/g, ' ');
+  const canonicalUnit = unit.startsWith('fl') || unit.startsWith('fluid') ? 'fl oz'
+    : unit.startsWith('ounce') || unit === 'oz' ? 'oz'
+    : unit.startsWith('pound') || unit === 'lb' || unit === 'lbs' ? 'lb'
+    : unit.startsWith('gram') || unit === 'g' ? 'g'
+    : unit === 'kg' ? 'kg'
+    : unit === 'ml' ? 'ml'
+    : 'l';
+  return `${Number(match[1])} ${canonicalUnit}`;
+}
+
+function flavorValue(product) {
+  const explicit = normalized(product.flavor ?? product.variant);
+  if (explicit) return explicit;
+  if (isVarietyPack(product)) return 'variety pack';
+  const text = normalized([product.productName, product.title].filter(Boolean).join(' '));
+  return flavorWords.find((flavor) => text.includes(flavor)) ?? null;
+}
+
+function hasDifferentVerifiedValues(leftValue, rightValue) {
+  return leftValue !== null && rightValue !== null && leftValue !== rightValue;
+}
+
+function packageValidation(storeProduct, amazonProduct) {
+  const storePackCount = packCount(storeProduct);
+  const amazonPackCount = packCount(amazonProduct);
+  if (storePackCount === null || amazonPackCount === null) return { status: 'needs_review', reason: 'Pack count cannot be verified.' };
+  if (storePackCount !== amazonPackCount) return { status: 'reject', reason: `Pack count is different (${storePackCount} vs ${amazonPackCount}).` };
+
+  const sourceMultiPack = storePackCount > 1 || multiPackPattern.test(combinedText(storeProduct));
+  const amazonMultiPack = amazonPackCount > 1 || multiPackPattern.test(combinedText(amazonProduct));
+  if (sourceMultiPack !== amazonMultiPack) return { status: 'reject', reason: 'Multi-pack vs single item mismatch.' };
+
+  const storePackageSize = packageSizeValue(storeProduct);
+  const amazonPackageSize = packageSizeValue(amazonProduct);
+  if (hasDifferentVerifiedValues(storePackageSize, amazonPackageSize)) return { status: 'reject', reason: `Package size is different (${storePackageSize} vs ${amazonPackageSize}).` };
+
+  const storeIsVariety = isVarietyPack(storeProduct);
+  const amazonIsVariety = isVarietyPack(amazonProduct);
+  if (storeIsVariety && !amazonIsVariety) return { status: 'reject', reason: 'Variety pack must never match a fixed flavor product.' };
+  if (!storeIsVariety && amazonIsVariety) return { status: 'reject', reason: 'Fixed flavor must never match a variety pack.' };
+
+  const storeFlavor = flavorValue(storeProduct);
+  const amazonFlavor = flavorValue(amazonProduct);
+  if (!storeIsVariety && storeFlavor && amazonFlavor && storeFlavor !== amazonFlavor) return { status: 'reject', reason: `Flavor pack does not match (${storeFlavor} vs ${amazonFlavor}).` };
+
+  return { status: 'pass', reason: null };
 }
 
 function hasSharedNameTokens(storeProduct, amazonProduct) {
@@ -100,33 +181,40 @@ export function loadAmazonCatalogFromEnv() {
 
 export function scoreAmazonCandidate(storeProduct, amazonProduct) {
   const amazon = normalizeAmazonProduct(amazonProduct);
-  if (sameUpc(storeProduct, amazon)) return { confidenceScore: confidenceRules.upc, matchReason: 'UPC match', amazon };
-  if (sameAsin(storeProduct, amazon)) return { confidenceScore: confidenceRules.asin, matchReason: 'ASIN match', amazon };
+  const validation = packageValidation(storeProduct, amazon);
+  if (validation.status !== 'pass') {
+    return { confidenceScore: 0, matchReason: validation.status === 'needs_review' ? 'Needs Review' : 'Rejected', rejectionReason: validation.reason, needsReview: validation.status === 'needs_review', amazon };
+  }
 
   const brandMatches = sameBrand(storeProduct, amazon);
   const nameMatches = hasSharedNameTokens(storeProduct, amazon);
-  if (brandMatches && nameMatches && samePackageSize(storeProduct, amazon)) {
-    return { confidenceScore: confidenceRules.brandNamePackageSize, matchReason: 'Brand + Product Name + Package Size', amazon };
-  }
-  if (brandMatches && nameMatches && sameCount(storeProduct, amazon)) {
-    return { confidenceScore: confidenceRules.brandNameCount, matchReason: 'Brand + Product Name + Count', amazon };
-  }
-  if (brandMatches && nameMatches) {
-    return { confidenceScore: confidenceRules.brandName, matchReason: 'Brand + Product Name', amazon };
-  }
-  return { confidenceScore: 0, matchReason: 'No matching rule satisfied', amazon };
+  const packageSizeMatches = packageSizeValue(storeProduct) !== null && packageSizeValue(storeProduct) === packageSizeValue(amazon);
+  const countMatches = packCount(storeProduct) !== null && packCount(storeProduct) === packCount(amazon);
+  const flavorMatches = flavorValue(storeProduct) !== null && flavorValue(storeProduct) === flavorValue(amazon);
+
+  if (sameUpc(storeProduct, amazon)) return { confidenceScore: confidenceRules.upc, matchReason: 'UPC match + verified package count, size, and flavor gates', rejectionReason: null, amazon };
+  if (sameAsin(storeProduct, amazon)) return { confidenceScore: confidenceRules.asin, matchReason: 'ASIN match + verified package count, size, and flavor gates', rejectionReason: null, amazon };
+  if (brandMatches && countMatches && packageSizeMatches && flavorMatches && nameMatches) return { confidenceScore: confidenceRules.brandPackageCountPackageSizeFlavorName, matchReason: 'Brand + Package Count + Package Size + Flavor + Product Name', rejectionReason: null, amazon };
+  if (brandMatches && countMatches && packageSizeMatches && nameMatches) return { confidenceScore: confidenceRules.brandPackageCountPackageSizeName, matchReason: 'Brand + Package Count + Package Size + Product Name', rejectionReason: null, amazon };
+  if (brandMatches && countMatches && packageSizeMatches) return { confidenceScore: confidenceRules.brandPackageCountPackageSize, matchReason: 'Brand + Package Count + Package Size', rejectionReason: null, amazon };
+  if (brandMatches && countMatches) return { confidenceScore: confidenceRules.brandPackageCount, matchReason: 'Brand + Package Count', rejectionReason: null, amazon };
+  if (brandMatches && nameMatches) return { confidenceScore: confidenceRules.brandName, matchReason: 'Brand + Product Name', rejectionReason: null, amazon };
+  return { confidenceScore: 0, matchReason: 'No matching rule satisfied', rejectionReason: 'No matching rule satisfied.', amazon };
 }
 
 export function matchProductToAmazon(storeProduct, amazonCatalog = loadAmazonCatalogFromEnv()) {
   const candidates = amazonCatalog.map((amazonProduct) => scoreAmazonCandidate(storeProduct, amazonProduct));
   const best = candidates.sort((a, b) => b.confidenceScore - a.confidenceScore)[0];
-  const isMatched = Boolean(best && best.confidenceScore >= confidenceRules.brandName);
+  const isMatched = Boolean(best && best.confidenceScore >= confidenceRules.brandName && !best.needsReview && !best.rejectionReason);
+  const needsReview = Boolean(best?.needsReview) || !isMatched;
   return {
     sourceProduct: storeProduct,
+    status: isMatched ? 'Matched' : 'Needs Review',
     matched: isMatched,
-    needsReview: !isMatched,
+    needsReview,
     confidenceScore: best?.confidenceScore ?? 0,
     matchReason: isMatched ? best.matchReason : 'Below 80 = Needs Review',
+    rejectionReason: best?.rejectionReason ?? (isMatched ? null : 'Below 80 confidence.'),
     amazonAsin: isMatched ? best.amazon.asin : null,
     amazonTitle: isMatched ? best.amazon.title : null,
     amazonCurrentSellingPrice: isMatched ? best.amazon.currentSellingPrice : null
@@ -136,7 +224,7 @@ export function matchProductToAmazon(storeProduct, amazonCatalog = loadAmazonCat
 export function buildAmazonMatchingReport(products, amazonCatalog = loadAmazonCatalogFromEnv()) {
   const matches = products.map((product) => matchProductToAmazon(product, amazonCatalog));
   return {
-    engine: 'amazon-matching-engine-v1',
+    engine: 'amazon-matching-engine-v2',
     generatedAt: new Date().toISOString(),
     totals: {
       inputProducts: products.length,
@@ -145,10 +233,13 @@ export function buildAmazonMatchingReport(products, amazonCatalog = loadAmazonCa
       needsReview: matches.filter((match) => match.needsReview).length
     },
     confidenceRules: {
-      '100': 'UPC match',
-      '95': 'Brand + Product Name + Package Size',
-      '90': 'Brand + Product Name + Count',
-      '80': 'Brand + Product Name',
+      '100': 'UPC match after package count, package size, multi-pack, and flavor gates',
+      '98': 'ASIN match after package count, package size, multi-pack, and flavor gates',
+      '96': 'Brand + Package Count + Package Size + Flavor + Product Name',
+      '92': 'Brand + Package Count + Package Size + Product Name',
+      '88': 'Brand + Package Count + Package Size',
+      '84': 'Brand + Package Count',
+      '80': 'Brand + Product Name after required gates',
       'Below 80': 'Needs Review'
     },
     matches
@@ -174,6 +265,6 @@ export async function runAmazonMatchingEngine({ dealProductsPath, amazonCatalog 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const dealProductsPath = process.argv[2];
   const report = await runAmazonMatchingEngine({ dealProductsPath });
-  console.log(`Amazon Matching Engine v1 complete: ${report.totals.matched}/${report.totals.inputProducts} matched.`);
+  console.log(`Amazon Matching Engine v2 complete: ${report.totals.matched}/${report.totals.inputProducts} matched.`);
   console.log(`Wrote ${path.relative(repositoryRoot, defaultMatchingReportPath)}`);
 }
