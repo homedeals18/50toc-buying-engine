@@ -6,7 +6,7 @@
   "scripts": {
     "test": "playwright test",
     "scrape:revseller": "playwright test tests/revseller-authenticated-data.spec.js --project=chromium",
-    "unit": "node --test connector-config.test.mjs"
+    "unit": "node --test connector-config.test.mjs revseller-integration.test.mjs"
   },
   "devDependencies": {
     "@playwright/test": "latest",
