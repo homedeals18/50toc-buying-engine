@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { runStandardizedModule } from '../shared/module-interface.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +30,8 @@ export function toProjectRelativePath(absolutePath) {
 const mainArtifactRoot = resolveArtifactPath('main');
 const finalShoppingListPath = resolveArtifactPath('main', 'final-shopping-list.json');
 const finalExecutionReportPath = resolveArtifactPath('main', 'final-execution-report.json');
+const mainExecutionLogPath = resolveArtifactPath('main', 'execution-log.json');
+const mainModuleReportPath = resolveArtifactPath('main', 'module-execution-report.json');
 
 export const defaultConnectorRegistry = [
   {
@@ -261,6 +264,32 @@ export async function runMainBuyingEngine(connectors = defaultConnectorRegistry)
   await writeFile(finalShoppingListPath, JSON.stringify(finalProducts, null, 2));
   await writeFile(finalExecutionReportPath, JSON.stringify(report, null, 2));
   return { finalProducts, report };
+}
+
+
+export async function run(input = {}) {
+  const connectors = input.connectors ?? defaultConnectorRegistry;
+  return runStandardizedModule({
+    id: 'main-buying-engine',
+    name: 'Main Buying Engine',
+    inputFile: input.inputFile ?? connectors.map((connector) => connector.dealProductsPath).filter(Boolean).join(','),
+    outputFile: input.outputPath ?? finalShoppingListPath,
+    logFile: input.logFile ?? mainExecutionLogPath,
+    reportFile: input.reportFile ?? mainModuleReportPath
+  }, async () => {
+    const { finalProducts, report } = await runMainBuyingEngine(connectors);
+    const warnings = report.connectors.filter((connector) => connector.severity === 'warning').map((connector) => connector.warning ?? connector.message);
+    const errors = report.connectors.filter((connector) => connector.severity === 'error').map((connector) => connector.error ?? connector.message);
+    return {
+      status: errors.length ? 'FAIL' : 'PASS',
+      outputFile: finalShoppingListPath,
+      processedItems: finalProducts.length,
+      warnings,
+      errors,
+      data: { totals: report.totals },
+      executionReport: toProjectRelativePath(finalExecutionReportPath)
+    };
+  });
 }
 
 if (isDirectExecution(import.meta.url)) {

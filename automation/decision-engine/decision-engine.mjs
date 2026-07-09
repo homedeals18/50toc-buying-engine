@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runStandardizedModule } from '../shared/module-interface.mjs';
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const defaultConfigPath = path.join(repositoryRoot, 'config', 'decision-engine.config.json');
@@ -9,6 +10,8 @@ export const defaultMainBuyingEnginePath = path.join(repositoryRoot, 'artifacts'
 export const defaultAmazonDiscoveryPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'product-discovery.json');
 export const defaultRevsellerAnalysisPath = path.join(repositoryRoot, 'artifacts', 'revseller', 'revseller-analysis-report.json');
 export const defaultDecisionReportPath = path.join(repositoryRoot, 'artifacts', 'decision-engine', 'decision-report.json');
+export const defaultExecutionLogPath = path.join(repositoryRoot, 'artifacts', 'decision-engine', 'execution-log.json');
+export const defaultExecutionReportPath = path.join(repositoryRoot, 'artifacts', 'decision-engine', 'module-execution-report.json');
 
 const DECISIONS = Object.freeze({ BUY: 'BUY', DONT_BUY: "DON'T BUY", NEEDS_REVIEW: 'NEEDS REVIEW' });
 
@@ -166,6 +169,29 @@ export async function runDecisionEngine({ configPath = defaultConfigPath, mainBu
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(report, null, 2));
   return report;
+}
+
+
+export async function run(input = {}) {
+  const outputPath = input.outputPath ?? defaultDecisionReportPath;
+  return runStandardizedModule({
+    id: 'decision-engine',
+    name: 'Decision Engine',
+    inputFile: input.mainBuyingEnginePath ?? defaultMainBuyingEnginePath,
+    outputFile: outputPath,
+    logFile: input.logFile ?? defaultExecutionLogPath,
+    reportFile: input.reportFile ?? defaultExecutionReportPath
+  }, async () => {
+    const report = await runDecisionEngine({ ...input, outputPath });
+    return {
+      status: report.totals.needsReview ? 'WARNING' : 'PASS',
+      inputFile: input.mainBuyingEnginePath ?? defaultMainBuyingEnginePath,
+      outputFile: outputPath,
+      processedItems: report.totals.products,
+      warnings: report.totals.needsReview ? [`${report.totals.needsReview} product(s) need review`] : [],
+      data: { totals: report.totals }
+    };
+  });
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
