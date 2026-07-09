@@ -1,0 +1,18 @@
+{
+  "engine": "decision-engine-v1",
+  "generatedAt": "2026-07-09T17:32:31.337Z",
+  "configPath": "config/decision-engine.config.json",
+  "inputs": {
+    "mainBuyingEngine": "artifacts/main/final-shopping-list.json",
+    "amazonProductDiscovery": "artifacts/amazon/product-discovery.json",
+    "revsellerAnalysis": "artifacts/revseller/revseller-analysis-report.json"
+  },
+  "totals": {
+    "products": 0,
+    "buy": 0,
+    "dontBuy": 0,
+    "needsReview": 0
+  },
+  "firstDecision": null,
+  "decisions": []
+}
