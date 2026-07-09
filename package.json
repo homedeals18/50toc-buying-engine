@@ -7,6 +7,7 @@
     "run:main-buying-engine": "node automation/main/run-main-buying-engine.mjs",
     "dev:all": "node automation/dev/run-dev-all.mjs",
     "dev:quick": "node automation/dev/run-dev-quick.mjs",
-    "scrape:sams-club:clearance": "npm --prefix automation/sams_club run scrape:sams-club:clearance"
+    "scrape:sams-club:clearance": "npm --prefix automation/sams_club run scrape:sams-club:clearance",
+    "run:amazon-matching-engine": "node automation/shared/amazon-matching-engine.mjs"
   }
 }
