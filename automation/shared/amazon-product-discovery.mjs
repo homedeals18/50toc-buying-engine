@@ -3,9 +3,12 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAmazonBrowserPage } from '../amazon/browser-session/index.mjs';
+import { runStandardizedModule, toProjectRelativePath } from './module-interface.mjs';
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const defaultProductDiscoveryPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'product-discovery.json');
+export const defaultExecutionLogPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'execution-log.json');
+export const defaultExecutionReportPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'module-execution-report.json');
 export const defaultInputCandidates = [
   path.join(repositoryRoot, 'artifacts', 'main', 'final-shopping-list.json'),
   path.join(repositoryRoot, 'artifacts', 'bjs', 'logs', 'deal-products.json'),
@@ -147,6 +150,31 @@ export async function runAmazonProductDiscovery({ inputPath, products, outputPat
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(report, null, 2));
   return report;
+}
+
+
+export async function run(input = {}) {
+  const outputPath = input.outputPath ?? defaultProductDiscoveryPath;
+  return runStandardizedModule({
+    id: 'amazon-product-discovery',
+    name: 'Amazon Product Discovery',
+    inputFile: input.inputPath,
+    outputFile: outputPath,
+    logFile: input.logFile ?? defaultExecutionLogPath,
+    reportFile: input.reportFile ?? defaultExecutionReportPath
+  }, async () => {
+    const report = await runAmazonProductDiscovery({ ...input, outputPath });
+    const inputFile = input.inputPath ?? report.inputPath;
+    return {
+      status: report.totals.notMatched ? 'WARNING' : 'PASS',
+      inputFile,
+      outputFile: outputPath,
+      processedItems: report.totals.inputProducts,
+      warnings: report.totals.notMatched ? [`${report.totals.notMatched} product(s) were not matched on Amazon`] : [],
+      data: { totals: report.totals },
+      executionReport: toProjectRelativePath(outputPath)
+    };
+  });
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
