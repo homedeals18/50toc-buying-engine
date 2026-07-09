@@ -24,17 +24,11 @@ export function costcoPriceParsingSource() {
     }
     function extractCostcoPrices(text) {
       const source = String(text || '').replace(/\u00a0/g, ' ');
-      const patterns = [
-        /\$\s*(?:\d{1,3}(?:,\d{3})+|\d+)\s*\.\s*\d{2}\b/g,
-        /\$\s*(?:\d{1,3}(?:,\d{3})+|\d+)\s+\d{2}\b/g,
-        /\$\s*(?:\d{1,3}(?:,\d{3})+|\d+)\b(?![,.]|\s*(?:\.|\d{2}\b))/g
-      ];
+      const pricePattern = /\$\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\s*\.\s*\d{2}|\s+\d{2})?\b/g;
       const found = [];
-      for (const pattern of patterns) {
-        for (const match of source.matchAll(pattern)) {
-          const normalized = normalizeCostcoMoney(match[0]);
-          if (normalized && !found.includes(normalized)) found.push(normalized);
-        }
+      for (const match of source.matchAll(pricePattern)) {
+        const normalized = normalizeCostcoMoney(match[0]);
+        if (normalized && !found.includes(normalized)) found.push(normalized);
       }
       return found;
     }

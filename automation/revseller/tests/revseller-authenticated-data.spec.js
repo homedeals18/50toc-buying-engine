@@ -2,7 +2,7 @@ import { chromium, expect, test as base } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { getRevsellerCredentials, revsellerConnectorConfig as config } from '../connector-config.mjs';
-import { amazonAnalysisReportPath, extractRevsellerFields, openAmazonMatch, readConnectorProductsFromJsonFile, readRevsellerPanel, writeRevsellerAnalysisReport } from '../revseller-integration.mjs';
+import { amazonAnalysisReportPath, extractRevsellerFields, openConfidentAmazonMatch, readConnectorProductsFromJsonFile, readRevsellerPanel, writeRevsellerAnalysisReport } from '../revseller-integration.mjs';
 
 const artifactRoot = path.resolve(process.cwd(), '../../artifacts/revseller');
 const logDir = path.join(artifactRoot, 'logs');
@@ -82,11 +82,29 @@ async function connectorProducts() {
 }
 
 async function analyzeProduct(page, connectorProduct) {
-  await openAmazonMatch(page, connectorProduct);
+  const amazonMatch = await openConfidentAmazonMatch(page, connectorProduct);
+  if (!amazonMatch.revsellerEligible) {
+    return {
+      connectorProduct,
+      amazonMatchStatus: amazonMatch.status,
+      needsReview: true,
+      confidenceScore: amazonMatch.match.confidenceScore,
+      matchReason: amazonMatch.match.matchReason,
+      revsellerPanelRead: false,
+      analyzedAt: new Date().toISOString()
+    };
+  }
   await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
   const panel = await readRevsellerPanel(page);
   return {
     connectorProduct,
+    amazonMatchStatus: amazonMatch.status,
+    needsReview: false,
+    confidenceScore: amazonMatch.match.confidenceScore,
+    matchReason: amazonMatch.match.matchReason,
+    amazonAsin: amazonMatch.match.amazonAsin,
+    amazonTitle: amazonMatch.match.amazonTitle,
+    revsellerPanelRead: true,
     ...extractRevsellerFields(panel),
     analyzedAt: new Date().toISOString()
   };
