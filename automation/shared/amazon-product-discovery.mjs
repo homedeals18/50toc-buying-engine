@@ -3,12 +3,16 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAmazonBrowserPage } from '../amazon/browser-session/index.mjs';
+import { detectRevsellerPanel, extractRevsellerFields, readRevsellerPanel, saveRevsellerNotVisibleArtifacts, writeRevsellerAnalysisReport } from '../revseller/revseller-integration.mjs';
 import { runStandardizedModule, toProjectRelativePath } from './module-interface.mjs';
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const defaultProductDiscoveryPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'product-discovery.json');
+export const defaultAmazonAnalysisPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'amazon-analysis.json');
 export const defaultExecutionLogPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'execution-log.json');
 export const defaultExecutionReportPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'module-execution-report.json');
+export const defaultRevsellerUnavailableScreenshotPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'revseller-unavailable.png');
+export const defaultRevsellerUnavailableHtmlPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'revseller-unavailable.html');
 export const defaultInputCandidates = [
   path.join(repositoryRoot, 'artifacts', 'main', 'final-shopping-list.json'),
   path.join(repositoryRoot, 'artifacts', 'bjs', 'logs', 'deal-products.json'),
@@ -132,6 +136,63 @@ export async function discoverAmazonProduct(product, { fetchText, page } = {}) {
   return { sourceProduct: product, searchQuery, searchUrl, matched: Boolean(amazonProduct.asin), matchScore: bestCandidate.matchScore, amazonProduct };
 }
 
+export async function readRevsellerForDiscoveredAmazonProduct(page, { screenshotPath = defaultRevsellerUnavailableScreenshotPath, htmlPath = defaultRevsellerUnavailableHtmlPath } = {}) {
+  const detection = await detectRevsellerPanel(page);
+  if (!detection.visible) {
+    const artifacts = await saveRevsellerNotVisibleArtifacts(page, { screenshotPath, htmlPath });
+    return {
+      status: 'error',
+      error: 'RevSeller panel is not visible on the opened Amazon product page.',
+      pageUrl: page.url(),
+      revsellerPanelVisible: false,
+      artifacts
+    };
+  }
+
+  const panel = await readRevsellerPanel(page);
+  return {
+    status: 'success',
+    source: 'RevSeller',
+    pageUrl: page.url(),
+    revsellerPanelVisible: true,
+    data: extractRevsellerFields(panel)
+  };
+}
+
+export async function analyzeAmazonProduct(product, { fetchText, page, revsellerOptions } = {}) {
+  const browserPage = page ?? (!fetchText ? await getAmazonBrowserPage() : null);
+  const discovery = await discoverAmazonProduct(product, { fetchText, page: browserPage });
+  const analysis = {
+    storeProduct: product,
+    amazonProduct: discovery.amazonProduct,
+    revseller: null
+  };
+
+  if (!discovery.matched || !browserPage) {
+    analysis.revseller = {
+      status: 'error',
+      error: discovery.matched ? 'RevSeller requires the shared browser page opened by Amazon Product Discovery.' : 'No matched Amazon product page is available for RevSeller reading.',
+      pageUrl: discovery.amazonProduct?.productUrl ?? discovery.searchUrl ?? null,
+      revsellerPanelVisible: false
+    };
+    return analysis;
+  }
+
+  analysis.revseller = await readRevsellerForDiscoveredAmazonProduct(browserPage, revsellerOptions);
+  return analysis;
+}
+
+export async function runAmazonAnalysis({ product, inputPath, products, outputPath = defaultAmazonAnalysisPath, fetchText, page, revsellerOptions } = {}) {
+  const resolvedInputPath = inputPath ?? defaultInputCandidates.find((candidate) => existsSync(candidate));
+  const selectedProduct = product ?? products?.[0] ?? (resolvedInputPath ? (await readInputProducts(resolvedInputPath))[0] : null);
+  if (!selectedProduct) throw new Error('No store product is available for Amazon analysis');
+  const browserPage = page ?? (!fetchText ? await getAmazonBrowserPage() : null);
+  const analysis = await analyzeAmazonProduct(selectedProduct, { fetchText, page: browserPage, revsellerOptions });
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  await writeRevsellerAnalysisReport(outputPath, analysis);
+  return analysis;
+}
+
 export async function readInputProducts(inputPath) {
   const raw = await readFile(inputPath, 'utf8');
   const parsed = JSON.parse(raw);
@@ -178,8 +239,16 @@ export async function run(input = {}) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  const inputPath = process.argv[2] ? path.resolve(process.argv[2]) : path.join(repositoryRoot, 'artifacts', 'main', 'final-shopping-list.json');
-  const report = await runAmazonProductDiscovery({ inputPath });
-  console.log(`Amazon Product Discovery v1 complete: ${report.totals.matched}/${report.totals.inputProducts} matched.`);
-  console.log(`Wrote ${path.relative(repositoryRoot, defaultProductDiscoveryPath)}`);
+  const runAnalysis = process.argv.includes('--analysis');
+  const inputArgument = process.argv.slice(2).find((argument) => !argument.startsWith('--'));
+  const inputPath = inputArgument ? path.resolve(inputArgument) : path.join(repositoryRoot, 'artifacts', 'main', 'final-shopping-list.json');
+  if (runAnalysis) {
+    const analysis = await runAmazonAnalysis({ inputPath: inputArgument ? inputPath : undefined });
+    console.log(`Amazon Analysis complete: ${analysis.amazonProduct?.asin ?? 'no Amazon match'}.`);
+    console.log(`Wrote ${path.relative(repositoryRoot, defaultAmazonAnalysisPath)}`);
+  } else {
+    const report = await runAmazonProductDiscovery({ inputPath });
+    console.log(`Amazon Product Discovery v1 complete: ${report.totals.matched}/${report.totals.inputProducts} matched.`);
+    console.log(`Wrote ${path.relative(repositoryRoot, defaultProductDiscoveryPath)}`);
+  }
 }

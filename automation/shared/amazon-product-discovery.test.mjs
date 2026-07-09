@@ -10,6 +10,7 @@ import {
   extractAsinFromUrl,
   parseAmazonProductPage,
   parseAmazonSearchResults,
+  runAmazonAnalysis,
   runAmazonProductDiscovery,
   selectBestAmazonCandidate
 } from './amazon-product-discovery.mjs';
@@ -133,6 +134,96 @@ test('runAmazonProductDiscovery writes artifacts/amazon/product-discovery.json c
     assert.equal(report.engine, 'amazon-product-discovery-v1');
     assert.equal(written.totals.matched, 1);
     assert.equal(written.discoveries[0].amazonProduct.asin, 'B000BEST22');
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('runAmazonAnalysis reuses Product Discovery product page and merges RevSeller data', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'amazon-analysis-'));
+  const outputPath = path.join(tempRoot, 'artifacts', 'amazon', 'amazon-analysis.json');
+  const visited = [];
+  const page = {
+    async goto(url) {
+      visited.push(url);
+    },
+    async content() {
+      return visited.at(-1).includes('/s?') ? searchHtml : productHtml;
+    },
+    url() {
+      return 'https://www.amazon.com/dp/B000BEST22';
+    },
+    async waitForLoadState() {},
+    async waitForTimeout() {},
+    locator() {
+      return { first: () => ({ async isVisible() { return true; } }) };
+    },
+    async evaluate(fn) {
+      return {
+        asin: 'B000BEST22',
+        productTitle: 'Acme Protein Bars Chocolate 24 ct',
+        productUrl: 'https://www.amazon.com/dp/B000BEST22',
+        panelText: 'ASIN: B000BEST22 Product Title: Acme Protein Bars Chocolate 24 ct Amazon Price: $29.99 FBA Fees: $5.32 Estimated Profit: $4.67 ROI: 31% BSR: 12,345 Category: Grocery Hazmat: No Meltable: No IP Alert: None Variation: No'
+      };
+    }
+  };
+
+  try {
+    const analysis = await runAmazonAnalysis({
+      product: { supplier: "BJ's Wholesale Club", brand: 'Acme', productName: 'Protein Bars Chocolate', packageSize: '24 ct' },
+      outputPath,
+      page
+    });
+    const written = JSON.parse(await readFile(outputPath, 'utf8'));
+    assert.deepEqual(visited, ['https://www.amazon.com/s?k=Acme%20Protein%20Bars%20Chocolate%2024%20ct', 'https://www.amazon.com/dp/B000BEST22']);
+    assert.equal(analysis.amazonProduct.asin, 'B000BEST22');
+    assert.equal(analysis.revseller.status, 'success');
+    assert.equal(written.revseller.data.currentAmazonPrice, 29.99);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('runAmazonAnalysis saves screenshot, HTML, and structured RevSeller error when unavailable', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'amazon-analysis-missing-revseller-'));
+  const outputPath = path.join(tempRoot, 'artifacts', 'amazon', 'amazon-analysis.json');
+  const screenshotPath = path.join(tempRoot, 'artifacts', 'amazon', 'revseller-unavailable.png');
+  const htmlPath = path.join(tempRoot, 'artifacts', 'amazon', 'revseller-unavailable.html');
+  const visited = [];
+  const page = {
+    async goto(url) {
+      visited.push(url);
+    },
+    async content() {
+      return visited.at(-1).includes('/s?') ? searchHtml : productHtml;
+    },
+    url() {
+      return 'https://www.amazon.com/dp/B000BEST22';
+    },
+    async waitForLoadState() {},
+    async waitForTimeout() {},
+    locator() {
+      return { first: () => ({ async isVisible() { return false; } }) };
+    },
+    async evaluate() {
+      return { asin: 'B000BEST22', productTitle: 'Acme Protein Bars Chocolate 24 ct', productUrl: 'https://www.amazon.com/dp/B000BEST22', panelText: '' };
+    },
+    async screenshot({ path: target }) {
+      await writeFile(target, 'fake image');
+    }
+  };
+
+  try {
+    const analysis = await runAmazonAnalysis({
+      product: { brand: 'Acme', productName: 'Protein Bars Chocolate', packageSize: '24 ct' },
+      outputPath,
+      page,
+      revsellerOptions: { screenshotPath, htmlPath }
+    });
+    const written = JSON.parse(await readFile(outputPath, 'utf8'));
+    assert.equal(analysis.revseller.status, 'error');
+    assert.equal(written.revseller.artifacts.screenshotPath, screenshotPath);
+    assert.equal(await readFile(htmlPath, 'utf8'), productHtml);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
