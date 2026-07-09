@@ -11,6 +11,7 @@
     "run:amazon-matching-engine": "node automation/shared/amazon-matching-engine.mjs",
     "scrape:revseller": "npm --prefix automation/revseller run scrape:revseller",
     "test:revseller-config": "npm --prefix automation/revseller run unit",
-    "run:amazon-product-discovery": "node automation/shared/amazon-product-discovery.mjs"
+    "run:amazon-product-discovery": "node automation/shared/amazon-product-discovery.mjs",
+    "read:revseller": "npm --prefix automation/revseller run read:open-page"
   }
 }

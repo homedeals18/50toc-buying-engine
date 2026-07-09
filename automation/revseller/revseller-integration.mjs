@@ -5,6 +5,10 @@ import { redactSensitiveText } from './connector-config.mjs';
 import { confidenceRules, matchProductToAmazon } from '../shared/amazon-matching-engine.mjs';
 
 export const amazonAnalysisReportPath = path.resolve(process.cwd(), '../../artifacts/amazon/revseller-analysis-report.json');
+export const revsellerArtifactRoot = path.resolve(process.cwd(), '../../artifacts/revseller');
+export const revsellerReaderReportPath = path.join(revsellerArtifactRoot, 'revseller-analysis-report.json');
+export const revsellerMissingScreenshotPath = path.join(revsellerArtifactRoot, 'revseller-panel-not-visible.png');
+export const revsellerMissingHtmlPath = path.join(revsellerArtifactRoot, 'revseller-panel-not-visible.html');
 
 export function parseMoney(value) {
   const match = String(value ?? '').match(/-?\$?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)/);
@@ -18,30 +22,37 @@ export function parsePercent(value) {
 
 function valueAfterLabel(text, labelPattern) {
   const source = String(text ?? '').replace(/\s+/g, ' ').trim();
-  const match = source.match(new RegExp(`${labelPattern}\\s*:?\\s*([^|•\\n]+?)(?=\\s+(?:ASIN|Product Title|Title|Current Amazon Price|Amazon Price|Price|FBA Fees?|Fees?|Estimated Profit|Profit|ROI|BSR|Rank|Category|Hazmat|Meltable|IP Alert|Variation)\\b|$)`, 'i'));
+  const match = source.match(new RegExp(`${labelPattern}\\s*:?\\s*([^|•\\n]+?)(?=\\s+(?:ASIN|Product Title|Title|Selling Price|Current Amazon Price|Amazon Price|Price|FBA Fees?|Fees?|Estimated Profit|Profit|ROI|BSR|Rank|Category|Hazmat|Meltable|IP / Restriction warnings?|IP Alert|IP Warning|Restriction warnings?|Restrictions?|Variation)\\b|$)`, 'i'));
   return match?.[1]?.trim() || null;
 }
 
 export function extractRevsellerFields({ panelText, asin, productTitle, productUrl }) {
   const text = String(panelText ?? '');
   const extractedAsin = valueAfterLabel(text, 'ASIN') || text.match(/\b[A-Z0-9]{10}\b/)?.[0] || asin || null;
-  const priceText = valueAfterLabel(text, '(?:Current Amazon Price|Amazon Price|Price)');
+  const priceText = valueAfterLabel(text, '(?:Selling Price|Current Amazon Price|Amazon Price|Price)');
   const feeText = valueAfterLabel(text, '(?:FBA Fees?|Fees?)');
   const profitText = valueAfterLabel(text, '(?:Estimated Profit|Profit)');
   const roiText = valueAfterLabel(text, 'ROI');
+  const hazmatText = valueAfterLabel(text, 'Hazmat');
+  const meltableText = valueAfterLabel(text, 'Meltable');
+  const ipText = valueAfterLabel(text, '(?:IP / Restriction warnings?|IP Alert|IP Warning|Restriction warnings?|Restrictions?)');
   return {
     asin: extractedAsin,
     productTitle: valueAfterLabel(text, '(?:Product Title|Title)') || productTitle || null,
     productUrl: productUrl || null,
+    sellingPrice: priceText || null,
     currentAmazonPrice: parseMoney(priceText),
-    fbaFees: parseMoney(feeText),
-    estimatedProfit: parseMoney(profitText),
-    roi: parsePercent(roiText),
+    fbaFees: feeText || null,
+    estimatedProfit: profitText || null,
+    roi: roiText || null,
     bsr: valueAfterLabel(text, '(?:BSR|Rank)'),
     category: valueAfterLabel(text, 'Category'),
-    hazmat: valueAfterLabel(text, 'Hazmat'),
-    meltable: valueAfterLabel(text, 'Meltable'),
-    ipAlert: valueAfterLabel(text, 'IP Alert'),
+    hazmatWarning: hazmatText || null,
+    meltableWarning: meltableText || null,
+    ipRestrictionWarnings: ipText || null,
+    hazmat: hazmatText || null,
+    meltable: meltableText || null,
+    ipAlert: ipText || null,
     variation: valueAfterLabel(text, 'Variation'),
     revsellerPanelFound: Boolean(text.trim()),
     profitabilitySource: text.trim() ? 'RevSeller' : null
@@ -140,4 +151,68 @@ export async function readRevsellerPanel(page) {
     const panelText = clean(nodes.map((node) => node.innerText || node.textContent || node.getAttribute('src')).filter(Boolean).join(' '));
     return { asin, productTitle, productUrl: location.href, panelText };
   });
+}
+
+
+export const revsellerPanelSelectors = [
+  '[id*="revseller" i]',
+  '[class*="revseller" i]',
+  '[data-testid*="revseller" i]',
+  '[aria-label*="revseller" i]',
+  'iframe[src*="revseller" i]',
+  '[id*="rs-" i]',
+  '[class*="rs-" i]'
+];
+
+export function isAmazonProductPageUrl(url) {
+  return /amazon\.[a-z.]+\/(?:[^/]+\/)?(?:dp|gp\/product)\/[A-Z0-9]{10}/i.test(String(url ?? ''));
+}
+
+export async function findOpenAmazonProductPage(context) {
+  const pages = context.pages();
+  const activeAmazonProductPage = pages.find((page) => isAmazonProductPageUrl(page.url()));
+  if (activeAmazonProductPage) return activeAmazonProductPage;
+  return pages.find((page) => /amazon\./i.test(page.url())) ?? pages[0] ?? await context.newPage();
+}
+
+export async function detectRevsellerPanel(page, { timeoutMs = 15_000 } = {}) {
+  const selector = revsellerPanelSelectors.join(', ');
+  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined);
+  await page.waitForTimeout(1_000);
+  const locator = page.locator(selector).first();
+  const visible = await locator.isVisible({ timeout: timeoutMs }).catch(() => false);
+  if (visible) return { visible: true, selector };
+  const panel = await readRevsellerPanel(page);
+  return { visible: Boolean(panel.panelText), selector, panelTextFound: Boolean(panel.panelText) };
+}
+
+export async function saveRevsellerNotVisibleArtifacts(page, { screenshotPath = revsellerMissingScreenshotPath, htmlPath = revsellerMissingHtmlPath } = {}) {
+  await mkdir(path.dirname(screenshotPath), { recursive: true });
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  await writeFile(htmlPath, await page.content());
+  return { screenshotPath, htmlPath };
+}
+
+export async function readRevsellerFromOpenAmazonPage(context, { reportPath = revsellerReaderReportPath } = {}) {
+  const page = await findOpenAmazonProductPage(context);
+  const url = page.url();
+  if (!isAmazonProductPageUrl(url)) {
+    const artifacts = await saveRevsellerNotVisibleArtifacts(page);
+    const report = { status: 'error', error: 'No opened Amazon product page was found in the shared browser session.', pageUrl: url, artifacts, completedAt: new Date().toISOString() };
+    await writeRevsellerAnalysisReport(reportPath, report);
+    throw new Error(report.error);
+  }
+
+  const detection = await detectRevsellerPanel(page);
+  if (!detection.visible) {
+    const artifacts = await saveRevsellerNotVisibleArtifacts(page);
+    const report = { status: 'error', error: 'RevSeller panel is not visible on the opened Amazon product page.', pageUrl: url, artifacts, completedAt: new Date().toISOString() };
+    await writeRevsellerAnalysisReport(reportPath, report);
+    throw new Error(report.error);
+  }
+
+  const panel = await readRevsellerPanel(page);
+  const report = { status: 'success', source: 'RevSeller', pageUrl: url, revsellerPanelVisible: true, data: extractRevsellerFields(panel), completedAt: new Date().toISOString() };
+  await writeRevsellerAnalysisReport(reportPath, report);
+  return report;
 }
