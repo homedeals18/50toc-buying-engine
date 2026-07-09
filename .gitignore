@@ -29,3 +29,7 @@ artifacts/revseller/logs/*
 
 artifacts/amazon/*
 !artifacts/amazon/.gitkeep
+
+# Local persistent browser sessions (cookies/login state; never commit)
+artifacts/amazon/browser-session/
+automation/amazon/browser-session/chromium-profile/
