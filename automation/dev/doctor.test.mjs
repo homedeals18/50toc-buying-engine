@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { parseDotEnv, requiredArtifactFolders, runDoctor } from './doctor.mjs';
+import { parseDotEnv, printDoctorResults, requiredArtifactFolders, runDoctor } from './doctor.mjs';
 
 async function createChromeFixture() {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'doctor-fixture-'));
@@ -60,4 +60,36 @@ test('runDoctor checks Chrome, RevSeller, remote debugging, and artifact folders
   } finally {
     await rm(fixture.tempDir, { recursive: true, force: true });
   }
+});
+
+
+test('printDoctorResults prints the diagnostic report table', () => {
+  const lines = [];
+  const failures = printDoctorResults([
+    { name: 'Node', status: 'PASS' },
+    { name: 'npm', status: 'PASS' },
+    { name: 'Chrome executable', status: 'PASS' },
+    { name: 'Chrome profile path', status: 'PASS' },
+    { name: 'RevSeller extension presence', status: 'FAIL' },
+    { name: 'Remote debugging endpoint on port 9222', status: 'PASS' },
+    { name: 'Required artifact folders', status: 'PASS' }
+  ], { log: (line) => lines.push(line) });
+
+  assert.equal(failures, 2);
+  assert.deepEqual(lines, [
+    '================================',
+    '50TOC Doctor',
+    '================================',
+    '',
+    'Node................. PASS',
+    'npm.................. PASS',
+    'Chrome............... PASS',
+    'Chrome Profile....... PASS',
+    'RevSeller............ FAIL',
+    'Amazon Login......... FAIL',
+    'Remote Debugging..... PASS',
+    'Artifacts............ PASS',
+    '',
+    '================================'
+  ]);
 });

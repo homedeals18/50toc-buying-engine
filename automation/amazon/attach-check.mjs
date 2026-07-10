@@ -1,4 +1,6 @@
+import path from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { closeAmazonBrowserSession, defaultAmazonChromeCdpEndpoint, getAmazonBrowserSession, revsellerUnavailableMessage, revsellerVerificationAmazonProductUrl } from './browser-session/browser-session.mjs';
 
 export function versionUrlForEndpoint(endpoint) {
@@ -19,10 +21,19 @@ async function loadChromium() {
   return requireFromRevseller('playwright').chromium;
 }
 
-export async function runAttachCheck({ endpoint = process.env.AMAZON_CHROME_CDP_ENDPOINT ?? defaultAmazonChromeCdpEndpoint, fetchImpl = fetch, chromium, getSession = getAmazonBrowserSession, closeSession = closeAmazonBrowserSession, amazonProductUrl = revsellerVerificationAmazonProductUrl } = {}) {
+export async function runAttachCheck({ endpoint = process.env.AMAZON_CHROME_CDP_ENDPOINT ?? defaultAmazonChromeCdpEndpoint, fetchImpl = fetch, chromium, getSession = getAmazonBrowserSession, closeSession = closeAmazonBrowserSession, amazonProductUrl = revsellerVerificationAmazonProductUrl, onStep } = {}) {
   const results = [];
+  const step = (message) => {
+    if (onStep) onStep(message);
+  };
   const pass = (name, detail) => results.push({ status: 'PASS', name, detail });
   const fail = (name, detail) => results.push({ status: 'FAIL', name, detail });
+
+  step('Checking Chrome...');
+  step('Checking profile...');
+  step('Checking port 9222...');
+  step('Checking DevTools...');
+  step('Checking RevSeller...');
 
   let version;
   try {
@@ -51,18 +62,24 @@ export async function runAttachCheck({ endpoint = process.env.AMAZON_CHROME_CDP_
 }
 
 export function printAttachCheckResults(results, { log = console.log } = {}) {
-  log('\nAmazon Attach Check Results');
-  log('===========================');
-  for (const result of results) {
-    log(`${result.status} ${result.name}`);
-    if (result.detail) log(`  ${result.detail}`);
+  const failures = results.filter((result) => result.status === 'FAIL');
+  if (failures.length === 0) {
+    log('PASS');
+  } else {
+    log('FAIL');
+    log('Reason:');
+    for (const result of failures) {
+      log(`${result.name}: ${result.detail || 'Validation failed.'}`);
+    }
   }
-  const failures = results.filter((result) => result.status === 'FAIL').length;
-  log(`\nSummary: ${results.length - failures} PASS, ${failures} FAIL`);
-  return failures;
+  return failures.length;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const results = await runAttachCheck();
+function isDirectRun() {
+  return process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+}
+
+if (isDirectRun()) {
+  const results = await runAttachCheck({ onStep: console.log });
   process.exitCode = printAttachCheckResults(results) === 0 ? 0 : 1;
 }
