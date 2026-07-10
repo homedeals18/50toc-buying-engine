@@ -1,0 +1,9 @@
+RevSeller panel text could not be extracted from artifacts/amazon/revseller-unavailable.html because that source HTML artifact is not present in this workspace.
+
+Reader diagnosis:
+- The previous reader only evaluated candidates in the main document.
+- If RevSeller rendered its panel text inside an iframe, the old reader could record the iframe element as a candidate but could not read the iframe document's visible text nodes.
+- If RevSeller rendered inside an open shadow root, the old reader did not traverse shadowRoot contents, so visible text inside the panel was missed.
+- The unavailable-artifact path saved the screenshot and full page HTML but did not save a panel-text artifact, leaving no direct text-node diagnostic file for this run.
+
+Panel visible text nodes found in this workspace:
