@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal
 cd /d "%~dp0"
-node automation\setup\doctor.mjs
+npm run doctor
 exit /b %ERRORLEVEL%
