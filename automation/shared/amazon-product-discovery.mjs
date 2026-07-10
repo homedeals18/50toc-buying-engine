@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAmazonBrowserPage } from '../amazon/browser-session/index.mjs';
-import { detectRevsellerPanel, extractRevsellerFields, readRevsellerPanel, revsellerFieldsFound, saveRevsellerNotVisibleArtifacts, saveRevsellerPanelArtifacts, writeRevsellerAnalysisReport } from '../revseller/revseller-integration.mjs';
+import { detectRevsellerPanel, extractRevsellerFields, readRevsellerPanel, revsellerFieldsFound, saveRevsellerFrameDebugArtifact, saveRevsellerNotVisibleArtifacts, saveRevsellerPanelArtifacts, saveRevsellerPanelTextArtifact, writeRevsellerAnalysisReport } from '../revseller/revseller-integration.mjs';
 import { runStandardizedModule, toProjectRelativePath } from './module-interface.mjs';
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -136,7 +136,7 @@ export async function discoverAmazonProduct(product, { fetchText, page } = {}) {
   return { sourceProduct: product, searchQuery, searchUrl, matched: Boolean(amazonProduct.asin), matchScore: bestCandidate.matchScore, amazonProduct };
 }
 
-export async function readRevsellerForDiscoveredAmazonProduct(page, { screenshotPath = defaultRevsellerUnavailableScreenshotPath, htmlPath = defaultRevsellerUnavailableHtmlPath, panelTextPath } = {}) {
+export async function readRevsellerForDiscoveredAmazonProduct(page, { screenshotPath = defaultRevsellerUnavailableScreenshotPath, htmlPath = defaultRevsellerUnavailableHtmlPath, panelTextPath, frameDebugPath } = {}) {
   const detection = await detectRevsellerPanel(page);
   if (!detection.visible) {
     const artifacts = await saveRevsellerNotVisibleArtifacts(page, { screenshotPath, htmlPath, panelTextPath });
@@ -150,15 +150,27 @@ export async function readRevsellerForDiscoveredAmazonProduct(page, { screenshot
   }
 
   const panel = await readRevsellerPanel(page);
+  const debug = await saveRevsellerFrameDebugArtifact(page, panel, frameDebugPath ? { debugPath: frameDebugPath } : {});
+  const savedPanelTextPath = await saveRevsellerPanelTextArtifact(panel, panelTextPath ? { panelTextPath } : {});
+  if (!panel.panelText) {
+    return {
+      status: 'error',
+      error: 'RevSeller panel text was not found in the live Amazon page.',
+      pageUrl: page.url(),
+      revsellerPanelVisible: detection.visible,
+      artifacts: { panelTextPath: savedPanelTextPath, frameDebugPath: debug.debugPath, diagnostics: debug.diagnostics }
+    };
+  }
   const data = extractRevsellerFields({ ...panel, panelFound: true });
-  const artifacts = revsellerFieldsFound(data) ? undefined : await saveRevsellerPanelArtifacts(page, panel, { screenshotPath, htmlPath });
+  const artifacts = revsellerFieldsFound(data) ? {} : await saveRevsellerPanelArtifacts(page, panel, { screenshotPath, htmlPath });
   return {
     status: 'success',
     source: 'RevSeller',
     pageUrl: page.url(),
     revsellerPanelVisible: data.revsellerPanelFound,
     data,
-    ...(artifacts ? { artifacts, warning: 'RevSeller panel was visible, but expected fields were not found in the panel.' } : {})
+    artifacts: { ...artifacts, panelTextPath: savedPanelTextPath, frameDebugPath: debug.debugPath },
+    ...(!revsellerFieldsFound(data) ? { warning: 'RevSeller panel was visible, but expected fields were not found in the panel.' } : {})
   };
 }
 
