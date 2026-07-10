@@ -22,6 +22,38 @@ test('extracts RevSeller panel fields without calculating profitability', () => 
   assert.equal(result.profitabilitySource, 'RevSeller');
 });
 
+
+test('prefers structured RevSeller DOM fields and keeps panel visibility consistent', () => {
+  const result = extractRevsellerFields({
+    asin: 'B000000002',
+    productUrl: 'https://www.amazon.com/dp/B000000002',
+    panelText: 'RevSeller profit calculator',
+    panelFound: true,
+    fields: {
+      sellingPrice: '$24.99',
+      fbaFees: '$6.12',
+      estimatedProfit: '$7.44',
+      roi: '42%',
+      bsr: '8,765',
+      category: 'Grocery & Gourmet Food',
+      hazmatWarning: 'No hazmat warning',
+      meltableWarning: 'Meltable',
+      ipRestrictionWarnings: 'Restriction warning shown'
+    }
+  });
+
+  assert.equal(result.revsellerPanelFound, true);
+  assert.equal(result.sellingPrice, '$24.99');
+  assert.equal(result.fbaFees, '$6.12');
+  assert.equal(result.estimatedProfit, '$7.44');
+  assert.equal(result.roi, '42%');
+  assert.equal(result.bsr, '8,765');
+  assert.equal(result.category, 'Grocery & Gourmet Food');
+  assert.equal(result.hazmatWarning, 'No hazmat warning');
+  assert.equal(result.meltableWarning, 'Meltable');
+  assert.equal(result.ipRestrictionWarnings, 'Restriction warning shown');
+});
+
 test('builds reusable Amazon match query from connector product fields', () => {
   assert.equal(amazonMatchQuery({ brand: 'Brand', productName: 'Product', packageSize: '12 ct', count: '12 pack' }), 'Brand Product 12 ct 12 pack');
   assert.equal(amazonMatchQuery({ asin: 'B000000001' }), 'B000000001');

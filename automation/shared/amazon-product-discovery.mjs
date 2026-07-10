@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAmazonBrowserPage } from '../amazon/browser-session/index.mjs';
-import { detectRevsellerPanel, extractRevsellerFields, readRevsellerPanel, saveRevsellerNotVisibleArtifacts, writeRevsellerAnalysisReport } from '../revseller/revseller-integration.mjs';
+import { detectRevsellerPanel, extractRevsellerFields, readRevsellerPanel, revsellerFieldsFound, saveRevsellerNotVisibleArtifacts, saveRevsellerPanelArtifacts, writeRevsellerAnalysisReport } from '../revseller/revseller-integration.mjs';
 import { runStandardizedModule, toProjectRelativePath } from './module-interface.mjs';
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -150,12 +150,15 @@ export async function readRevsellerForDiscoveredAmazonProduct(page, { screenshot
   }
 
   const panel = await readRevsellerPanel(page);
+  const data = extractRevsellerFields({ ...panel, panelFound: true });
+  const artifacts = revsellerFieldsFound(data) ? undefined : await saveRevsellerPanelArtifacts(page, panel, { screenshotPath, htmlPath });
   return {
     status: 'success',
     source: 'RevSeller',
     pageUrl: page.url(),
-    revsellerPanelVisible: true,
-    data: extractRevsellerFields(panel)
+    revsellerPanelVisible: data.revsellerPanelFound,
+    data,
+    ...(artifacts ? { artifacts, warning: 'RevSeller panel was visible, but expected fields were not found in the panel.' } : {})
   };
 }
 
