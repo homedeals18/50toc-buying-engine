@@ -26,6 +26,22 @@ Optional:
 
 ## Windows setup
 
+Attach Mode is the default architecture. The automation attaches to an existing CDP-enabled Chrome session and does not launch Chrome, create a second profile, or create a temporary profile.
+
+For the existing `Default` profile, run the repository-root launcher:
+
+```bat
+start-chrome-debug.bat
+```
+
+The launcher starts Google Chrome with `--remote-debugging-port=9222`, `--user-data-dir=%LOCALAPPDATA%\Google\Chrome\User Data`, and `--profile-directory=Default`. If Chrome is already running without remote debugging, the launcher prints a clear message asking you to close Chrome first so it does not open a second profile.
+
+1. Run `start-chrome-debug.bat` from the repository root.
+2. Log into Amazon and RevSeller if needed in the Chrome window that opens.
+3. Run `npm run run:amazon-analysis` while that same Chrome window stays open.
+
+For custom Chrome profile configuration:
+
 1. Start your normal Chrome session with `--remote-debugging-port=9222` so CDP attach is available.
 2. In Chrome, open `chrome://version`.
 3. Copy these values:

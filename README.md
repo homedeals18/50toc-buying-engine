@@ -149,7 +149,21 @@ The manual script connects to `http://127.0.0.1:9222` by default; override it wi
 
 ## RevSeller local integration
 
-The RevSeller integration attaches to the operator's already-running regular Google Chrome session through CDP instead of launching a persistent profile. Configure the Chrome profile that already has Amazon logged in and the RevSeller extension installed and logged in, then start that same Chrome session with `--remote-debugging-port=9222` before running automation:
+The RevSeller integration attaches to the operator's already-running regular Google Chrome session through CDP instead of launching a persistent profile. Attach Mode is the default architecture: automation connects to Chrome over CDP and does not launch Chrome itself, create a second profile, or create a temporary profile.
+
+On Windows, start Chrome Attach Mode from the repository root with the launcher. The launcher opens the existing `Default` Chrome profile with `--remote-debugging-port=9222`; if Chrome is already running without remote debugging, it stops and asks you to close Chrome first so it does not open a second profile.
+
+```bat
+start-chrome-debug.bat
+```
+
+After Chrome opens, log into Amazon and RevSeller if needed, keep that same Chrome window open, then run:
+
+```bash
+npm run run:amazon-analysis
+```
+
+For non-Windows environments or custom profiles, configure the Chrome profile that already has Amazon logged in and the RevSeller extension installed and logged in, then start that same Chrome session with `--remote-debugging-port=9222` before running automation:
 
 ```bash
 export AMAZON_CHROME_PATH="/path/to/google-chrome"
