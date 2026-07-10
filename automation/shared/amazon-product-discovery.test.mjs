@@ -189,6 +189,7 @@ test('runAmazonAnalysis saves screenshot, HTML, and structured RevSeller error w
   const outputPath = path.join(tempRoot, 'artifacts', 'amazon', 'amazon-analysis.json');
   const screenshotPath = path.join(tempRoot, 'artifacts', 'amazon', 'revseller-unavailable.png');
   const htmlPath = path.join(tempRoot, 'artifacts', 'amazon', 'revseller-unavailable.html');
+  const panelTextPath = path.join(tempRoot, 'artifacts', 'amazon', 'revseller-panel-text.txt');
   const visited = [];
   const page = {
     async goto(url) {
@@ -206,7 +207,7 @@ test('runAmazonAnalysis saves screenshot, HTML, and structured RevSeller error w
       return { first: () => ({ async isVisible() { return false; } }) };
     },
     async evaluate() {
-      return { asin: 'B000BEST22', productTitle: 'Acme Protein Bars Chocolate 24 ct', productUrl: 'https://www.amazon.com/dp/B000BEST22', panelText: '' };
+      return { asin: 'B000BEST22', productTitle: 'Acme Protein Bars Chocolate 24 ct', productUrl: 'https://www.amazon.com/dp/B000BEST22', panelText: '', panelTextNodes: [] };
     },
     async screenshot({ path: target }) {
       await writeFile(target, 'fake image');
@@ -218,12 +219,14 @@ test('runAmazonAnalysis saves screenshot, HTML, and structured RevSeller error w
       product: { brand: 'Acme', productName: 'Protein Bars Chocolate', packageSize: '24 ct' },
       outputPath,
       page,
-      revsellerOptions: { screenshotPath, htmlPath }
+      revsellerOptions: { screenshotPath, htmlPath, panelTextPath }
     });
     const written = JSON.parse(await readFile(outputPath, 'utf8'));
     assert.equal(analysis.revseller.status, 'error');
     assert.equal(written.revseller.artifacts.screenshotPath, screenshotPath);
     assert.equal(await readFile(htmlPath, 'utf8'), productHtml);
+    assert.equal(written.revseller.artifacts.panelTextPath, panelTextPath);
+    assert.equal(await readFile(panelTextPath, 'utf8'), '\n');
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

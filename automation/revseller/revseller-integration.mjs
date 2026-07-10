@@ -11,6 +11,7 @@ export const revsellerMissingScreenshotPath = path.join(revsellerArtifactRoot, '
 export const revsellerMissingHtmlPath = path.join(revsellerArtifactRoot, 'revseller-panel-not-visible.html');
 export const revsellerFieldsMissingScreenshotPath = path.join(revsellerArtifactRoot, 'revseller-panel-fields-missing.png');
 export const revsellerFieldsMissingHtmlPath = path.join(revsellerArtifactRoot, 'revseller-panel-fields-missing.html');
+export const revsellerPanelTextPath = path.join(revsellerArtifactRoot, 'revseller-panel-text.txt');
 
 export function parseMoney(value) {
   const match = String(value ?? '').match(/-?\$?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)/);
@@ -194,61 +195,96 @@ export async function openConfidentAmazonMatch(page, product) {
   };
 }
 
+function revsellerPanelBrowserReader() {
+  const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
+  const visibleTextNodes = (root) => {
+    const nodes = [];
+    const isVisibleElement = (element) => {
+      if (!element || element.nodeType !== Node.ELEMENT_NODE) return true;
+      const style = getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 || rect.height > 0 || element.tagName === 'IFRAME';
+    };
+    const visit = (node) => {
+      if (!node) return;
+      if (node.nodeType === Node.TEXT_NODE) {
+        const parent = node.parentElement;
+        const text = clean(node.nodeValue);
+        if (text && isVisibleElement(parent)) nodes.push(text);
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
+      if (node.nodeType === Node.ELEMENT_NODE && !isVisibleElement(node)) return;
+      if (node.shadowRoot) visit(node.shadowRoot);
+      for (const child of node.childNodes) visit(child);
+    };
+    visit(root);
+    return nodes;
+  };
+  const asin = location.href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.[1] || document.querySelector('[name="ASIN"]')?.value || null;
+  const productTitle = clean(document.querySelector('#productTitle')?.textContent || document.title);
+  const selector = '[id*="revseller" i], [class*="revseller" i], [data-testid*="revseller" i], [aria-label*="revseller" i], iframe[src*="revseller" i], [id*="rs-" i], [class*="rs-" i]';
+  const labels = ['sell price', 'selling price', 'fba fee', 'estimated profit', 'net profit', 'roi', 'bsr', 'sales rank', 'hazmat', 'meltable', 'ip alert', 'restriction'];
+  const candidates = [...document.querySelectorAll(selector)];
+  for (const host of document.querySelectorAll('*')) {
+    if (host.shadowRoot) candidates.push(...host.shadowRoot.querySelectorAll(selector));
+  }
+  for (const node of [...document.querySelectorAll('aside, section, div, table')]) {
+    const text = clean(node.innerText || node.textContent) || '';
+    const hits = labels.filter((label) => text.toLowerCase().includes(label)).length;
+    if (hits >= 3 && text.length < 12000) candidates.push(node);
+  }
+  const unique = [...new Set(candidates)].filter((node) => node?.isConnected);
+  const scored = unique.map((node, index) => {
+    const textNodes = visibleTextNodes(node);
+    const text = clean(textNodes.join(' ') || node.innerText || node.textContent || node.getAttribute('src')) || '';
+    const score = labels.filter((label) => text.toLowerCase().includes(label)).length + (/revseller/i.test(`${node.id} ${node.className} ${node.getAttribute?.('src') || ''}`) ? 10 : 0);
+    return { node, text, textNodes, score, index, hasShadowRoot: Boolean(node.shadowRoot), isIframe: node.tagName === 'IFRAME' };
+  }).filter((entry) => entry.text).sort((a, b) => b.score - a.score || a.text.length - b.text.length || a.index - b.index);
+  const panel = scored[0] || null;
+  const panelNode = panel?.node || null;
+  const panelText = clean(scored.map((entry) => entry.text).join(' '));
+  const panelTextNodes = [...new Set(scored.flatMap((entry) => entry.textNodes))];
+  const panelHtml = panelNode?.outerHTML || null;
+
+  const fieldPatterns = {
+    sellingPrice: /(?:selling|sell|amazon)\s*price/i,
+    fbaFees: /(?:fba\s*fees?|fees?)/i,
+    estimatedProfit: /(?:estimated|est\.?|net)?\s*profit/i,
+    roi: /\broi\b/i,
+    bsr: /\b(?:bsr|best sellers rank|sales rank|rank)\b/i,
+    category: /category/i,
+    hazmatWarning: /hazmat/i,
+    meltableWarning: /meltable/i,
+    ipRestrictionWarnings: /\b(?:ip|restriction|restricted)\b/i,
+    variation: /variation/i
+  };
+  const fieldNames = Object.keys(fieldPatterns);
+  const allPanelElements = panelNode ? [...panelNode.querySelectorAll('*')].sort((a, b) => (clean(a.innerText || a.textContent)?.length || 0) - (clean(b.innerText || b.textContent)?.length || 0)) : [];
+  const readNearbyValue = (element, fieldName) => {
+    const row = element.closest('tr, li, [role="row"], .row, [class*="row" i], [class*="line" i], div') || element;
+    const rowText = clean(row.innerText || row.textContent) || '';
+    const labelText = clean(element.innerText || element.textContent) || '';
+    const withoutLabel = clean(rowText.replace(labelText, ''));
+    const explicit = rowText.match(new RegExp(`${labelText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:?\\s*(.+)$`, 'i'))?.[1];
+    const sibling = clean(element.nextElementSibling?.innerText || element.nextElementSibling?.textContent);
+    return clean(sibling || explicit || withoutLabel || (fieldName === 'ipRestrictionWarnings' || fieldName.endsWith('Warning') ? rowText : null));
+  };
+  const fields = {};
+  for (const fieldName of fieldNames) {
+    const match = allPanelElements.find((element) => fieldPatterns[fieldName].test(clean(element.innerText || element.textContent) || ''));
+    const value = match ? readNearbyValue(match, fieldName) : null;
+    if (value) fields[fieldName] = value;
+  }
+  return { asin, productTitle, productUrl: location.href, panelText, panelTextNodes, panelHtml, fields, panelFound: Boolean(panelNode || panelText), renderContexts: scored.map(({ isIframe, hasShadowRoot, score }) => ({ isIframe, hasShadowRoot, score })) };
+}
+
 export async function readRevsellerPanel(page) {
   await page.waitForTimeout(5_000);
-  return page.evaluate(() => {
-    const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
-    const asin = location.href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.[1] || document.querySelector('[name="ASIN"]')?.value || null;
-    const productTitle = clean(document.querySelector('#productTitle')?.textContent || document.title);
-    const selector = '[id*="revseller" i], [class*="revseller" i], [data-testid*="revseller" i], [aria-label*="revseller" i], iframe[src*="revseller" i], [id*="rs-" i], [class*="rs-" i]';
-    const labels = ['sell price', 'selling price', 'fba fee', 'estimated profit', 'net profit', 'roi', 'bsr', 'sales rank', 'hazmat', 'meltable', 'ip alert', 'restriction'];
-    const candidates = [...document.querySelectorAll(selector)];
-    for (const node of [...document.querySelectorAll('aside, section, div, table')]) {
-      const text = clean(node.innerText || node.textContent) || '';
-      const hits = labels.filter((label) => text.toLowerCase().includes(label)).length;
-      if (hits >= 3 && text.length < 12000) candidates.push(node);
-    }
-    const unique = [...new Set(candidates)].filter((node) => node?.isConnected);
-    const scored = unique.map((node, index) => {
-      const text = clean(node.innerText || node.textContent || node.getAttribute('src')) || '';
-      const score = labels.filter((label) => text.toLowerCase().includes(label)).length + (/revseller/i.test(`${node.id} ${node.className} ${node.getAttribute?.('src') || ''}`) ? 10 : 0);
-      return { node, text, score, index };
-    }).filter((entry) => entry.text).sort((a, b) => b.score - a.score || a.text.length - b.text.length || a.index - b.index);
-    const panelNode = scored[0]?.node || null;
-    const panelText = clean(scored.map((entry) => entry.text).join(' '));
-    const panelHtml = panelNode?.outerHTML || null;
-
-    const fieldPatterns = {
-      sellingPrice: /(?:selling|sell|amazon)\s*price/i,
-      fbaFees: /(?:fba\s*fees?|fees?)/i,
-      estimatedProfit: /(?:estimated|est\.?|net)?\s*profit/i,
-      roi: /\broi\b/i,
-      bsr: /\b(?:bsr|best sellers rank|sales rank|rank)\b/i,
-      category: /category/i,
-      hazmatWarning: /hazmat/i,
-      meltableWarning: /meltable/i,
-      ipRestrictionWarnings: /\b(?:ip|restriction|restricted)\b/i,
-      variation: /variation/i
-    };
-    const fieldNames = Object.keys(fieldPatterns);
-    const allPanelElements = panelNode ? [...panelNode.querySelectorAll('*')].sort((a, b) => (clean(a.innerText || a.textContent)?.length || 0) - (clean(b.innerText || b.textContent)?.length || 0)) : [];
-    const readNearbyValue = (element, fieldName) => {
-      const row = element.closest('tr, li, [role="row"], .row, [class*="row" i], [class*="line" i], div') || element;
-      const rowText = clean(row.innerText || row.textContent) || '';
-      const labelText = clean(element.innerText || element.textContent) || '';
-      const withoutLabel = clean(rowText.replace(labelText, ''));
-      const explicit = rowText.match(new RegExp(`${labelText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:?\\s*(.+)$`, 'i'))?.[1];
-      const sibling = clean(element.nextElementSibling?.innerText || element.nextElementSibling?.textContent);
-      return clean(sibling || explicit || withoutLabel || (fieldName === 'ipRestrictionWarnings' || fieldName.endsWith('Warning') ? rowText : null));
-    };
-    const fields = {};
-    for (const fieldName of fieldNames) {
-      const match = allPanelElements.find((element) => fieldPatterns[fieldName].test(clean(element.innerText || element.textContent) || ''));
-      const value = match ? readNearbyValue(match, fieldName) : null;
-      if (value) fields[fieldName] = value;
-    }
-    return { asin, productTitle, productUrl: location.href, panelText, panelHtml, fields, panelFound: Boolean(panelNode || panelText) };
-  });
+  const frames = typeof page.frames === 'function' ? page.frames() : [page];
+  const framePanels = await Promise.all(frames.map((frame) => frame.evaluate(revsellerPanelBrowserReader).catch(() => null)));
+  return framePanels.filter(Boolean).sort((a, b) => Number(Boolean(b.panelText)) - Number(Boolean(a.panelText)) || (b.panelText?.length || 0) - (a.panelText?.length || 0))[0] ?? { panelText: '', panelTextNodes: [], fields: {}, panelFound: false };
 }
 
 
@@ -284,11 +320,19 @@ export async function detectRevsellerPanel(page, { timeoutMs = 15_000 } = {}) {
   return { visible: Boolean(panel.panelText), selector, panelTextFound: Boolean(panel.panelText) };
 }
 
-export async function saveRevsellerNotVisibleArtifacts(page, { screenshotPath = revsellerMissingScreenshotPath, htmlPath = revsellerMissingHtmlPath } = {}) {
+export async function saveRevsellerPanelTextArtifact(panel, { panelTextPath = revsellerPanelTextPath } = {}) {
+  await mkdir(path.dirname(panelTextPath), { recursive: true });
+  await writeFile(panelTextPath, (panel?.panelTextNodes?.length ? panel.panelTextNodes.join('\n') : panel?.panelText || '').trimEnd() + '\n');
+  return panelTextPath;
+}
+
+export async function saveRevsellerNotVisibleArtifacts(page, { screenshotPath = revsellerMissingScreenshotPath, htmlPath = revsellerMissingHtmlPath, panelTextPath } = {}) {
   await mkdir(path.dirname(screenshotPath), { recursive: true });
   await page.screenshot({ path: screenshotPath, fullPage: true });
   await writeFile(htmlPath, await page.content());
-  return { screenshotPath, htmlPath };
+  const panel = await readRevsellerPanel(page);
+  const savedPanelTextPath = await saveRevsellerPanelTextArtifact(panel, { panelTextPath: panelTextPath ?? path.join(path.dirname(htmlPath), 'revseller-panel-text.txt') });
+  return { screenshotPath, htmlPath, panelTextPath: savedPanelTextPath, panelEmpty: !Boolean(panel.panelText), renderContexts: panel.renderContexts ?? [] };
 }
 
 

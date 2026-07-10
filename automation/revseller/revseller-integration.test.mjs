@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { amazonMatchQuery, extractAmazonProductFromPage, extractRevsellerFields, isAmazonProductPageUrl } from './revseller-integration.mjs';
+import { amazonMatchQuery, extractAmazonProductFromPage, extractRevsellerFields, isAmazonProductPageUrl, readRevsellerPanel } from './revseller-integration.mjs';
 
 test('extracts RevSeller panel fields without calculating profitability', () => {
   const result = extractRevsellerFields({
@@ -72,4 +72,39 @@ test('identifies opened Amazon product page URLs without navigating', () => {
   assert.equal(isAmazonProductPageUrl('https://www.amazon.com/dp/B000000001'), true);
   assert.equal(isAmazonProductPageUrl('https://www.amazon.com/Some-Product/dp/B000000001?th=1'), true);
   assert.equal(isAmazonProductPageUrl('https://www.amazon.com/s?k=test'), false);
+});
+
+test('prefers RevSeller visible text nodes found inside iframe render contexts', async () => {
+  const page = {
+    async waitForTimeout() {},
+    frames() {
+      return [
+        { async evaluate() { return { panelText: '', panelTextNodes: [], fields: {}, panelFound: false }; } },
+        {
+          async evaluate() {
+            return {
+              asin: 'B000000003',
+              productTitle: 'Iframe Product',
+              productUrl: 'https://www.amazon.com/dp/B000000003',
+              panelText: 'Amazon Price $21.99 FBA Fees $5.00 Estimated Profit $6.25 ROI 38%',
+              panelTextNodes: ['Amazon Price', '$21.99', 'FBA Fees', '$5.00', 'Estimated Profit', '$6.25', 'ROI', '38%'],
+              fields: {},
+              panelFound: true,
+              renderContexts: [{ isIframe: true, hasShadowRoot: false, score: 14 }]
+            };
+          }
+        }
+      ];
+    }
+  };
+
+  const panel = await readRevsellerPanel(page);
+  const data = extractRevsellerFields({ ...panel, panelFound: panel.panelFound });
+
+  assert.deepEqual(panel.panelTextNodes, ['Amazon Price', '$21.99', 'FBA Fees', '$5.00', 'Estimated Profit', '$6.25', 'ROI', '38%']);
+  assert.equal(panel.renderContexts[0].isIframe, true);
+  assert.equal(data.currentAmazonPrice, 21.99);
+  assert.equal(data.fbaFees, '$5.00');
+  assert.equal(data.estimatedProfit, '$6.25');
+  assert.equal(data.roi, '38%');
 });

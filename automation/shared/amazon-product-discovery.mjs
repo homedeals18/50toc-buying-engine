@@ -136,10 +136,10 @@ export async function discoverAmazonProduct(product, { fetchText, page } = {}) {
   return { sourceProduct: product, searchQuery, searchUrl, matched: Boolean(amazonProduct.asin), matchScore: bestCandidate.matchScore, amazonProduct };
 }
 
-export async function readRevsellerForDiscoveredAmazonProduct(page, { screenshotPath = defaultRevsellerUnavailableScreenshotPath, htmlPath = defaultRevsellerUnavailableHtmlPath } = {}) {
+export async function readRevsellerForDiscoveredAmazonProduct(page, { screenshotPath = defaultRevsellerUnavailableScreenshotPath, htmlPath = defaultRevsellerUnavailableHtmlPath, panelTextPath } = {}) {
   const detection = await detectRevsellerPanel(page);
   if (!detection.visible) {
-    const artifacts = await saveRevsellerNotVisibleArtifacts(page, { screenshotPath, htmlPath });
+    const artifacts = await saveRevsellerNotVisibleArtifacts(page, { screenshotPath, htmlPath, panelTextPath });
     return {
       status: 'error',
       error: 'RevSeller panel is not visible on the opened Amazon product page.',
