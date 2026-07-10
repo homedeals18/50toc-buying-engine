@@ -1,17 +1,22 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { redactSensitiveText } from './connector-config.mjs';
 import { confidenceRules, matchProductToAmazon } from '../shared/amazon-matching-engine.mjs';
 
-export const amazonAnalysisReportPath = path.resolve(process.cwd(), '../../artifacts/amazon/revseller-analysis-report.json');
-export const revsellerArtifactRoot = path.resolve(process.cwd(), '../../artifacts/revseller');
+export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+export const amazonArtifactRoot = path.join(repositoryRoot, 'artifacts', 'amazon');
+export const amazonAnalysisReportPath = path.join(amazonArtifactRoot, 'revseller-analysis-report.json');
+export const revsellerArtifactRoot = path.join(repositoryRoot, 'artifacts', 'revseller');
 export const revsellerReaderReportPath = path.join(revsellerArtifactRoot, 'revseller-analysis-report.json');
 export const revsellerMissingScreenshotPath = path.join(revsellerArtifactRoot, 'revseller-panel-not-visible.png');
 export const revsellerMissingHtmlPath = path.join(revsellerArtifactRoot, 'revseller-panel-not-visible.html');
 export const revsellerFieldsMissingScreenshotPath = path.join(revsellerArtifactRoot, 'revseller-panel-fields-missing.png');
 export const revsellerFieldsMissingHtmlPath = path.join(revsellerArtifactRoot, 'revseller-panel-fields-missing.html');
-export const revsellerPanelTextPath = path.join(revsellerArtifactRoot, 'revseller-panel-text.txt');
+export const amazonRevsellerFrameDebugPath = path.join(amazonArtifactRoot, 'revseller-frame-debug.json');
+export const amazonRevsellerPanelTextPath = path.join(amazonArtifactRoot, 'revseller-panel-text.txt');
+export const revsellerPanelTextPath = amazonRevsellerPanelTextPath;
 
 export function parseMoney(value) {
   const match = String(value ?? '').match(/-?\$?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)/);
@@ -226,9 +231,21 @@ function revsellerPanelBrowserReader() {
   const productTitle = clean(document.querySelector('#productTitle')?.textContent || document.title);
   const selector = '[id*="revseller" i], [class*="revseller" i], [data-testid*="revseller" i], [aria-label*="revseller" i], iframe[src*="revseller" i], [id*="rs-" i], [class*="rs-" i]';
   const labels = ['sell price', 'selling price', 'fba fee', 'estimated profit', 'net profit', 'roi', 'bsr', 'sales rank', 'hazmat', 'meltable', 'ip alert', 'restriction'];
+  const shadowHosts = [...document.querySelectorAll('*')].filter((node) => node.shadowRoot);
+  const iframes = [...document.querySelectorAll('iframe')].map((iframe) => ({
+    src: iframe.src || iframe.getAttribute('src') || null,
+    id: iframe.id || null,
+    name: iframe.name || iframe.getAttribute('name') || null,
+    title: iframe.title || iframe.getAttribute('title') || null,
+    visible: (() => {
+      const style = getComputedStyle(iframe);
+      const rect = iframe.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && (rect.width > 0 || rect.height > 0);
+    })()
+  }));
   const candidates = [...document.querySelectorAll(selector)];
-  for (const host of document.querySelectorAll('*')) {
-    if (host.shadowRoot) candidates.push(...host.shadowRoot.querySelectorAll(selector));
+  for (const host of shadowHosts) {
+    candidates.push(...host.shadowRoot.querySelectorAll(selector));
   }
   for (const node of [...document.querySelectorAll('aside, section, div, table')]) {
     const text = clean(node.innerText || node.textContent) || '';
@@ -277,14 +294,48 @@ function revsellerPanelBrowserReader() {
     const value = match ? readNearbyValue(match, fieldName) : null;
     if (value) fields[fieldName] = value;
   }
-  return { asin, productTitle, productUrl: location.href, panelText, panelTextNodes, panelHtml, fields, panelFound: Boolean(panelNode || panelText), renderContexts: scored.map(({ isIframe, hasShadowRoot, score }) => ({ isIframe, hasShadowRoot, score })) };
+  return {
+    asin, productTitle, productUrl: location.href, panelText, panelTextNodes, panelHtml, fields,
+    panelFound: Boolean(panelNode || panelText),
+    diagnostics: {
+      frameUrl: location.href,
+      frameTitle: document.title || null,
+      isTopFrame: window.top === window,
+      revsellerPanelPresent: Boolean(panelNode || scored.length),
+      iframeCount: iframes.length,
+      iframes,
+      shadowRootCount: shadowHosts.length,
+      shadowHosts: shadowHosts.slice(0, 100).map((node) => ({ tagName: node.tagName, id: node.id || null, className: String(node.className || '') || null })),
+      visibleTextCandidates: scored.slice(0, 50).map(({ text, textNodes, score, hasShadowRoot, isIframe, node }) => ({
+        score, isIframe, hasShadowRoot, tagName: node.tagName, id: node.id || null, className: String(node.className || '') || null,
+        text: text.slice(0, 5000),
+        textNodes: textNodes.slice(0, 200)
+      }))
+    },
+    renderContexts: scored.map(({ isIframe, hasShadowRoot, score }) => ({ isIframe, hasShadowRoot, score }))
+  };
 }
 
 export async function readRevsellerPanel(page) {
   await page.waitForTimeout(5_000);
   const frames = typeof page.frames === 'function' ? page.frames() : [page];
-  const framePanels = await Promise.all(frames.map((frame) => frame.evaluate(revsellerPanelBrowserReader).catch(() => null)));
-  return framePanels.filter(Boolean).sort((a, b) => Number(Boolean(b.panelText)) - Number(Boolean(a.panelText)) || (b.panelText?.length || 0) - (a.panelText?.length || 0))[0] ?? { panelText: '', panelTextNodes: [], fields: {}, panelFound: false };
+  const framePanels = await Promise.all(frames.map(async (frame, index) => {
+    const metadata = {
+      index,
+      url: typeof frame.url === 'function' ? frame.url() : null,
+      name: typeof frame.name === 'function' ? frame.name() : null
+    };
+    const panel = await frame.evaluate(revsellerPanelBrowserReader).catch((error) => ({
+      panelText: '',
+      panelTextNodes: [],
+      fields: {},
+      panelFound: false,
+      diagnostics: { frameUrl: metadata.url, evaluateError: error.message }
+    }));
+    return { ...panel, frame: metadata, diagnostics: { ...panel.diagnostics, ...metadata } };
+  }));
+  const best = framePanels.filter(Boolean).sort((a, b) => Number(Boolean(b.panelText)) - Number(Boolean(a.panelText)) || (b.panelText?.length || 0) - (a.panelText?.length || 0))[0] ?? { panelText: '', panelTextNodes: [], fields: {}, panelFound: false };
+  return { ...best, frameDebug: framePanels };
 }
 
 
@@ -326,13 +377,53 @@ export async function saveRevsellerPanelTextArtifact(panel, { panelTextPath = re
   return panelTextPath;
 }
 
+export async function collectRevsellerLiveDiagnostics(page, panel = {}) {
+  const frameDebug = panel.frameDebug ?? [];
+  const context = typeof page.context === 'function' ? page.context() : null;
+  const serviceWorkerUrls = context?.serviceWorkers?.().map((worker) => worker.url()) ?? [];
+  const detectedExtensionUrls = serviceWorkerUrls.filter((url) => url.startsWith('chrome-extension://'));
+  const visibleTextCandidates = frameDebug.flatMap((entry) => entry.diagnostics?.visibleTextCandidates ?? []);
+  const revsellerPanelPresent = frameDebug.some((entry) => entry.diagnostics?.revsellerPanelPresent || /revseller/i.test(entry.panelText || ''));
+  return {
+    generatedAt: new Date().toISOString(),
+    pageUrl: page.url(),
+    isUserLoggedIntoRevseller: panel.panelText ? true : revsellerPanelPresent ? null : false,
+    isChromeExtensionLoaded: detectedExtensionUrls.length > 0 || revsellerPanelPresent,
+    detectedExtensionUrls,
+    isRevsellerPanelPresentInLivePage: revsellerPanelPresent,
+    hasIframes: frameDebug.some((entry) => (entry.diagnostics?.iframeCount ?? 0) > 0) || frameDebug.length > 1,
+    hasShadowRoots: frameDebug.some((entry) => (entry.diagnostics?.shadowRootCount ?? 0) > 0),
+    frames: frameDebug.map((entry) => ({
+      index: entry.frame?.index ?? entry.diagnostics?.index,
+      url: entry.frame?.url ?? entry.diagnostics?.frameUrl,
+      name: entry.frame?.name ?? null,
+      panelFound: Boolean(entry.panelFound),
+      panelTextLength: entry.panelText?.length ?? 0,
+      iframeCount: entry.diagnostics?.iframeCount ?? 0,
+      shadowRootCount: entry.diagnostics?.shadowRootCount ?? 0,
+      iframes: entry.diagnostics?.iframes ?? [],
+      visibleTextCandidates: entry.diagnostics?.visibleTextCandidates ?? [],
+      evaluateError: entry.diagnostics?.evaluateError
+    })),
+    visibleTextCandidates
+  };
+}
+
+export async function saveRevsellerFrameDebugArtifact(page, panel, { debugPath = amazonRevsellerFrameDebugPath } = {}) {
+  await mkdir(path.dirname(debugPath), { recursive: true });
+  const diagnostics = await collectRevsellerLiveDiagnostics(page, panel);
+  await writeFile(debugPath, JSON.stringify(diagnostics, null, 2));
+  return { debugPath, diagnostics };
+}
+
 export async function saveRevsellerNotVisibleArtifacts(page, { screenshotPath = revsellerMissingScreenshotPath, htmlPath = revsellerMissingHtmlPath, panelTextPath } = {}) {
   await mkdir(path.dirname(screenshotPath), { recursive: true });
   await page.screenshot({ path: screenshotPath, fullPage: true });
   await writeFile(htmlPath, await page.content());
   const panel = await readRevsellerPanel(page);
+  const debug = await saveRevsellerFrameDebugArtifact(page, panel);
   const savedPanelTextPath = await saveRevsellerPanelTextArtifact(panel, { panelTextPath: panelTextPath ?? path.join(path.dirname(htmlPath), 'revseller-panel-text.txt') });
-  return { screenshotPath, htmlPath, panelTextPath: savedPanelTextPath, panelEmpty: !Boolean(panel.panelText), renderContexts: panel.renderContexts ?? [] };
+  return { screenshotPath, htmlPath, panelTextPath: savedPanelTextPath, frameDebugPath: debug.debugPath, diagnostics: debug.diagnostics, panelEmpty: !Boolean(panel.panelText), renderContexts: panel.renderContexts ?? [] };
 }
 
 
@@ -367,9 +458,23 @@ export async function readRevsellerFromOpenAmazonPage(context, { reportPath = re
   }
 
   const panel = await readRevsellerPanel(page);
+  const debug = await saveRevsellerFrameDebugArtifact(page, panel);
+  const panelTextPath = await saveRevsellerPanelTextArtifact(panel);
+  if (!panel.panelText) {
+    const report = {
+      status: 'error',
+      error: 'RevSeller panel text was not found in the live Amazon page.',
+      pageUrl: url,
+      revsellerPanelVisible: detection.visible,
+      artifacts: { panelTextPath, frameDebugPath: debug.debugPath, diagnostics: debug.diagnostics },
+      completedAt: new Date().toISOString()
+    };
+    await writeRevsellerAnalysisReport(reportPath, report);
+    throw new Error(report.error);
+  }
   const data = extractRevsellerFields({ ...panel, panelFound: true });
   const artifacts = revsellerFieldsFound(data) ? undefined : await saveRevsellerPanelArtifacts(page, panel);
-  const report = { status: 'success', source: 'RevSeller', pageUrl: url, revsellerPanelVisible: data.revsellerPanelFound, data, ...(artifacts ? { artifacts, warning: 'RevSeller panel was visible, but expected fields were not found in the panel.' } : {}), completedAt: new Date().toISOString() };
+  const report = { status: 'success', source: 'RevSeller', pageUrl: url, revsellerPanelVisible: data.revsellerPanelFound, data, artifacts: { ...(artifacts ?? {}), panelTextPath, frameDebugPath: debug.debugPath }, ...(artifacts ? { warning: 'RevSeller panel was visible, but expected fields were not found in the panel.' } : {}), completedAt: new Date().toISOString() };
   await writeRevsellerAnalysisReport(reportPath, report);
   return report;
 }
