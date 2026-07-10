@@ -187,7 +187,7 @@ Run the RevSeller authenticated Amazon analysis from the repository root:
 npm run scrape:revseller
 ```
 
-Before analysis starts, the Amazon browser session manager verifies that RevSeller is available in the configured Chrome profile. If it is not, the run stops with `RevSeller extension is not available in the configured Chrome profile.` The automation reuses the configured profile's cookies and existing Amazon/RevSeller sessions; it does not log in automatically, create a temporary profile, add to cart, or purchase.
+Before analysis starts, the Amazon browser session manager inspects the configured Chrome profile's `Extensions` directory and logs detected extension IDs and names while looking for RevSeller by manifest/name/content signals. If profile inspection does not find RevSeller, it launches Chrome with the configured user data directory and profile directory, opens an Amazon product page, and checks the live page DOM for RevSeller. The run stops with `RevSeller extension is not available in the configured Chrome profile.` only when both profile inspection and live-page verification fail. The automation reuses the configured profile's cookies and existing Amazon/RevSeller sessions; it does not log in automatically, create a temporary profile, add to cart, or purchase.
 
 Authenticated RevSeller data is read only after the session check succeeds. The module is independent from BJ's, Costco, Sam's Club, and the Main Buying Engine. Future connectors can pass product records through a JSON file path, and the module will match each record to Amazon using `amazonUrl`, `productUrl`, `url`, `asin`, `upc`, or the combined `brand productName packageSize` fields:
 

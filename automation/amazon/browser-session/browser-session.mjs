@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ export const revsellerHomeUrl = 'https://www.revseller.com/';
 export const revsellerUnavailableMessage = 'RevSeller extension is not available in the configured Chrome profile.';
 export const chromeProfileInUseMessage = 'Configured Chrome profile is already in use. Start that existing Chrome session with --remote-debugging-port=9222 and set AMAZON_CHROME_CDP_ENDPOINT, or close Chrome before running Amazon analysis. The automation will not create a second conflicting Chrome instance or a temporary profile.';
 export const defaultAmazonChromeCdpEndpoint = 'http://127.0.0.1:9222';
+export const revsellerVerificationAmazonProductUrl = process.env.REVSELLER_VERIFICATION_AMAZON_PRODUCT_URL ?? 'https://www.amazon.com/dp/B00000JY1X';
 
 const defaultWindowsChromeConfig = {
   chromePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -82,13 +83,21 @@ export function isChromeProfileInUse(userDataDir) {
   return chromeProfileLockPaths(userDataDir).some((lockPath) => existsSync(lockPath));
 }
 
-async function connectToExistingChromeSession({ chromiumLauncher, cdpEndpoint = process.env.AMAZON_CHROME_CDP_ENDPOINT ?? defaultAmazonChromeCdpEndpoint, config, revsellerExtension }) {
+async function connectToExistingChromeSession({ chromiumLauncher, cdpEndpoint = process.env.AMAZON_CHROME_CDP_ENDPOINT ?? defaultAmazonChromeCdpEndpoint, config, revsellerExtension, liveVerificationOptions }) {
   try {
     const browser = await chromiumLauncher.connectOverCDP(cdpEndpoint);
     const context = browser.contexts()[0];
     if (!context) {
       await browser.close().catch(() => {});
       throw new Error('Connected Chrome session has no browser contexts.');
+    }
+    if (!revsellerExtension) {
+      const liveVerification = await verifyRevsellerPresenceFromLiveAmazonPage(context, liveVerificationOptions);
+      if (!liveVerification.present) {
+        await context.close().catch(() => {});
+        throw new Error(revsellerUnavailableMessage);
+      }
+      revsellerExtension = { extensionId: null, name: 'RevSeller', source: liveVerification.source, liveVerification };
     }
     context.amazonBrowserSession = {
       chromePath: config.chromePath,
@@ -104,6 +113,7 @@ async function connectToExistingChromeSession({ chromiumLauncher, cdpEndpoint = 
     };
     return context;
   } catch (error) {
+    if (error.message === revsellerUnavailableMessage) throw error;
     throw new Error(`${chromeProfileInUseMessage} Failed to connect to ${cdpEndpoint}: ${error.message}`);
   }
 }
@@ -125,23 +135,85 @@ async function readJsonIfExists(filePath) {
   }
 }
 
-function manifestMatchesRevseller(manifest) {
-  const text = [manifest?.name, manifest?.short_name, manifest?.description]
+async function listDirectoriesIfExists(directoryPath) {
+  try {
+    return (await readdir(directoryPath, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+}
+
+async function readLocalizedManifestValue(extensionRoot, manifest, value) {
+  const messageKey = String(value ?? '').match(/^__MSG_(.+)__$/i)?.[1];
+  if (!messageKey) return value ?? null;
+  const defaultLocale = manifest?.default_locale;
+  if (!defaultLocale) return value;
+  const messages = await readJsonIfExists(path.join(extensionRoot, '_locales', defaultLocale, 'messages.json'));
+  return messages?.[messageKey]?.message ?? value;
+}
+
+async function manifestSearchText(extensionRoot, manifest) {
+  const manifestValues = await Promise.all([manifest?.name, manifest?.short_name, manifest?.description].map((value) => readLocalizedManifestValue(extensionRoot, manifest, value)));
+  const contentScripts = (manifest?.content_scripts ?? []).flatMap((script) => [...(script.matches ?? []), ...(script.js ?? []), ...(script.css ?? [])]);
+  const permissions = [...(manifest?.permissions ?? []), ...(manifest?.host_permissions ?? []), ...(manifest?.optional_permissions ?? [])];
+  return [...manifestValues, manifest?.homepage_url, manifest?.update_url, manifest?.author, ...contentScripts, ...permissions]
     .filter(Boolean)
     .join(' ');
-  return /revseller/i.test(text);
+}
+
+function manifestMatchesRevsellerSearchText(text) {
+  return /revseller|rev\s*seller|amazon\s*fba\s*(calculator|profit)|fba\s*(calculator|profit)/i.test(text);
+}
+
+async function inspectExtensionDirectory(profilePath, extensionId) {
+  const extensionRoot = path.join(profilePath, 'Extensions', extensionId);
+  const versions = await listDirectoriesIfExists(extensionRoot);
+  const inspectedVersions = [];
+  for (const version of versions) {
+    const manifest = await readJsonIfExists(path.join(extensionRoot, version, 'manifest.json'));
+    if (!manifest) continue;
+    const name = await readLocalizedManifestValue(path.join(extensionRoot, version), manifest, manifest.name);
+    const shortName = await readLocalizedManifestValue(path.join(extensionRoot, version), manifest, manifest.short_name);
+    const description = await readLocalizedManifestValue(path.join(extensionRoot, version), manifest, manifest.description);
+    const searchText = await manifestSearchText(path.join(extensionRoot, version), manifest);
+    inspectedVersions.push({ version, manifest, name, shortName, description, searchText });
+  }
+  const latest = inspectedVersions.sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))[0];
+  return latest ? { extensionId, ...latest } : { extensionId, name: null, shortName: null, description: null, searchText: '' };
+}
+
+export async function inspectChromeProfileExtensions(profilePath) {
+  const preferences = await readJsonIfExists(path.join(profilePath, 'Preferences'));
+  const settings = preferences?.extensions?.settings ?? {};
+  const extensionIds = new Set([
+    ...Object.keys(settings),
+    ...(await listDirectoriesIfExists(path.join(profilePath, 'Extensions')))
+  ]);
+  const detected = [];
+  for (const extensionId of [...extensionIds].sort()) {
+    const setting = settings[extensionId] ?? {};
+    const disk = await inspectExtensionDirectory(profilePath, extensionId);
+    const manifest = disk.manifest ?? setting.manifest ?? {};
+    const preferenceRoot = path.join(profilePath, 'Extensions', extensionId, disk.version ?? '');
+    const preferenceText = await manifestSearchText(preferenceRoot, manifest);
+    detected.push({
+      extensionId,
+      name: disk.name ?? manifest.name ?? null,
+      shortName: disk.shortName ?? manifest.short_name ?? null,
+      description: disk.description ?? manifest.description ?? null,
+      version: disk.version ?? manifest.version ?? null,
+      enabled: setting.state !== 0,
+      source: disk.manifest ? 'Extensions directory' : 'Preferences',
+      matchesRevseller: setting.state !== 0 && manifestMatchesRevsellerSearchText(`${disk.searchText ?? ''} ${preferenceText}`)
+    });
+  }
+  console.log(`Detected Chrome extensions in configured profile ${profilePath}: ${detected.length ? detected.map((extension) => `${extension.extensionId}=${extension.name ?? extension.shortName ?? '(unknown name)'}`).join(', ') : '(none)'}`);
+  return detected;
 }
 
 export async function findRevsellerExtension(profilePath) {
-  const preferences = await readJsonIfExists(path.join(profilePath, 'Preferences'));
-  const settings = preferences?.extensions?.settings ?? {};
-  for (const [extensionId, setting] of Object.entries(settings)) {
-    if (setting?.state === 0) continue;
-    if (manifestMatchesRevseller(setting?.manifest)) {
-      return { extensionId, source: 'Preferences' };
-    }
-  }
-  return null;
+  const extensions = await inspectChromeProfileExtensions(profilePath);
+  return extensions.find((extension) => extension.matchesRevseller) ?? null;
 }
 
 export async function verifyRevsellerExtensionAvailable(profilePath) {
@@ -150,12 +222,27 @@ export async function verifyRevsellerExtensionAvailable(profilePath) {
   return extension;
 }
 
+async function verifyRevsellerPresenceFromLiveAmazonPage(context, { amazonProductUrl = revsellerVerificationAmazonProductUrl } = {}) {
+  const page = context.pages()[0] ?? await context.newPage();
+  await page.goto(amazonProductUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  await page.waitForTimeout(3_000).catch(() => undefined);
+  const selector = '[id*="revseller" i], [class*="revseller" i], [data-testid*="revseller" i], [data-test*="revseller" i], [data-extension*="revseller" i], [data-extension-id*="revseller" i], [data-chrome-extension*="revseller" i], [aria-label*="revseller" i], iframe[src*="revseller" i], iframe[src^="chrome-extension://"], [id^="rs-"], [class^="rs-"], [class*=" rs-"], [data-rs], [data-rs-root], [data-revseller]';
+  const frameResults = await Promise.all(page.frames().map(async (frame) => frame.evaluate((liveSelector) => {
+    const text = document.body?.innerText || document.body?.textContent || '';
+    const matched = [...document.querySelectorAll(liveSelector)].map((node) => ({ tagName: node.tagName, id: node.id || null, className: String(node.className || '') || null, src: node.getAttribute('src') || null }));
+    return { url: location.href, title: document.title, matched, textMentionsRevseller: /revseller/i.test(text) };
+  }, selector).catch((error) => ({ url: typeof frame.url === 'function' ? frame.url() : null, error: error.message, matched: [] }))));
+  const present = frameResults.some((result) => result.textMentionsRevseller || result.matched?.length);
+  console.log(`RevSeller live-page verification on ${page.url()}: ${present ? 'present' : 'not detected'}`);
+  return { present, source: 'live Amazon product page DOM', pageUrl: page.url(), frameResults };
+}
+
 export async function launchAmazonBrowserSession({ chromium, chromePath, userDataDir, profileDirectory, launchOptions } = {}) {
   const config = resolveChromeProfileConfig({ chromePath, userDataDir, profileDirectory });
-  const revsellerExtension = await verifyRevsellerExtensionAvailable(config.profilePath);
+  let revsellerExtension = await findRevsellerExtension(config.profilePath);
   const chromiumLauncher = await loadChromium(chromium);
   if (isChromeProfileInUse(config.userDataDir)) {
-    return connectToExistingChromeSession({ chromiumLauncher, config, revsellerExtension });
+    return connectToExistingChromeSession({ chromiumLauncher, config, revsellerExtension, liveVerificationOptions: launchOptions });
   }
   let context;
   try {
@@ -165,6 +252,14 @@ export async function launchAmazonBrowserSession({ chromium, chromePath, userDat
       throw new Error(`${chromeProfileInUseMessage} Original launch error: ${error.message}`);
     }
     throw error;
+  }
+  if (!revsellerExtension) {
+    const liveVerification = await verifyRevsellerPresenceFromLiveAmazonPage(context, launchOptions);
+    if (!liveVerification.present) {
+      await context.close().catch(() => {});
+      throw new Error(revsellerUnavailableMessage);
+    }
+    revsellerExtension = { extensionId: null, name: 'RevSeller', source: liveVerification.source, liveVerification };
   }
   context.amazonBrowserSession = {
     chromePath: config.chromePath,
