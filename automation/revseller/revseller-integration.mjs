@@ -11,6 +11,7 @@ export const revsellerMissingScreenshotPath = path.join(revsellerArtifactRoot, '
 export const revsellerMissingHtmlPath = path.join(revsellerArtifactRoot, 'revseller-panel-not-visible.html');
 export const revsellerFieldsMissingScreenshotPath = path.join(revsellerArtifactRoot, 'revseller-panel-fields-missing.png');
 export const revsellerFieldsMissingHtmlPath = path.join(revsellerArtifactRoot, 'revseller-panel-fields-missing.html');
+export const amazonRevsellerPanelTextPath = path.resolve(process.cwd(), '../../artifacts/amazon/revseller-panel-text.txt');
 
 export function parseMoney(value) {
   const match = String(value ?? '').match(/-?\$?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)/);
@@ -64,6 +65,90 @@ function valueAfterLabel(text, labelPattern) {
   const nextLabels = revsellerFieldLabels.map(escapeRegExp).join('|');
   const match = source.match(new RegExp(`(?:${labelPattern})\\s*:?\\s*([^|•\\n]+?)(?=\\s+(?:${nextLabels})\\b|$)`, 'i'));
   return match?.[1]?.trim() || null;
+}
+
+
+export function normalizeVisibleText(value) {
+  return String(value ?? '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function attrsFromTag(tag) {
+  const attrs = {};
+  for (const match of String(tag ?? '').matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)) attrs[match[1].toLowerCase()] = match[2] ?? match[3] ?? match[4] ?? '';
+  return attrs;
+}
+
+function readRevsellerHtmlRows(panelHtml) {
+  const rows = [];
+  const source = String(panelHtml ?? '');
+  const blockPattern = /<(?<tag>tr|li|div|span|section|p)\b(?<attrs>[^>]*)>(?<body>[\s\S]*?)<\/\k<tag>>/gi;
+  for (const match of source.matchAll(blockPattern)) {
+    const attrs = attrsFromTag(match.groups.attrs);
+    const attrText = Object.entries(attrs).map(([key, value]) => `${key}=${value}`).join(' ');
+    const rowText = normalizeVisibleText(match.groups.body);
+    if (!rowText) continue;
+    const label = attrs['data-rs-label'] || attrs['data-label'] || attrs['aria-label'] || attrs.title || null;
+    rows.push({ label: normalizeVisibleText(label), text: rowText, attrText });
+  }
+  return rows;
+}
+
+function valueFromRows(rows, labelPattern) {
+  const regex = new RegExp(labelPattern, 'i');
+  for (const row of rows) {
+    const haystack = `${row.label} ${row.attrText} ${row.text}`;
+    if (!regex.test(haystack)) continue;
+    if (row.label && regex.test(row.label)) {
+      const withoutLabel = normalizeVisibleText(row.text.replace(new RegExp(escapeRegExp(row.label), 'i'), ''));
+      if (withoutLabel) return withoutLabel.replace(/^[:\-–—]+\s*/, '');
+    }
+    const explicit = valueAfterLabel(row.text, labelPattern);
+    if (explicit) return explicit;
+    const parts = row.text.split(/[:\-–—]/).map((part) => part.trim()).filter(Boolean);
+    if (parts.length > 1) return parts.slice(1).join(' - ');
+    return row.text;
+  }
+  return null;
+}
+
+export function extractRevsellerPanelTextFromHtml(panelHtml) {
+  return normalizeVisibleText(panelHtml);
+}
+
+export function parseRevsellerPanelHtml(panelHtml, defaults = {}) {
+  const panelText = extractRevsellerPanelTextFromHtml(panelHtml);
+  const rows = readRevsellerHtmlRows(panelHtml);
+  const fields = {
+    sellingPrice: valueFromRows(rows, '(?:selling|sell|amazon)\\s*price'),
+    fbaFees: valueFromRows(rows, '(?:fba\\s*fees?|fees?)'),
+    estimatedProfit: valueFromRows(rows, '(?:estimated|est\\.?|net)?\\s*profit'),
+    roi: valueFromRows(rows, '\\broi\\b'),
+    bsr: valueFromRows(rows, '\\b(?:bsr|best sellers rank|sales rank|rank)\\b'),
+    category: valueFromRows(rows, 'category'),
+    hazmatWarning: valueFromRows(rows, 'hazmat'),
+    meltableWarning: valueFromRows(rows, 'meltable'),
+    ipRestrictionWarnings: valueFromRows(rows, '\\b(?:ip|restriction|restricted)\\b'),
+    variation: valueFromRows(rows, 'variation')
+  };
+  for (const key of Object.keys(fields)) if (!fields[key]) delete fields[key];
+  return { ...defaults, panelText, panelHtml: panelHtml || null, fields, panelFound: Boolean(panelText) };
+}
+
+export async function writeRevsellerPanelText(text, textPath = amazonRevsellerPanelTextPath) {
+  await mkdir(path.dirname(textPath), { recursive: true });
+  await writeFile(textPath, String(text ?? ''));
+  return textPath;
 }
 
 function firstNonEmpty(...values) {
@@ -196,7 +281,7 @@ export async function openConfidentAmazonMatch(page, product) {
 
 export async function readRevsellerPanel(page) {
   await page.waitForTimeout(5_000);
-  return page.evaluate(() => {
+  const browserPanel = await page.evaluate(() => {
     const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
     const asin = location.href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.[1] || document.querySelector('[name="ASIN"]')?.value || null;
     const productTitle = clean(document.querySelector('#productTitle')?.textContent || document.title);
@@ -249,6 +334,8 @@ export async function readRevsellerPanel(page) {
     }
     return { asin, productTitle, productUrl: location.href, panelText, panelHtml, fields, panelFound: Boolean(panelNode || panelText) };
   });
+  const htmlPanel = parseRevsellerPanelHtml(browserPanel.panelHtml, browserPanel);
+  return { ...browserPanel, panelText: browserPanel.panelText || htmlPanel.panelText, fields: { ...htmlPanel.fields, ...browserPanel.fields }, panelFound: browserPanel.panelFound || htmlPanel.panelFound };
 }
 
 
@@ -323,9 +410,11 @@ export async function readRevsellerFromOpenAmazonPage(context, { reportPath = re
   }
 
   const panel = await readRevsellerPanel(page);
+  const panelTextPath = await writeRevsellerPanelText(panel.panelText || extractRevsellerPanelTextFromHtml(panel.panelHtml));
   const data = extractRevsellerFields({ ...panel, panelFound: true });
-  const artifacts = revsellerFieldsFound(data) ? undefined : await saveRevsellerPanelArtifacts(page, panel);
-  const report = { status: 'success', source: 'RevSeller', pageUrl: url, revsellerPanelVisible: data.revsellerPanelFound, data, ...(artifacts ? { artifacts, warning: 'RevSeller panel was visible, but expected fields were not found in the panel.' } : {}), completedAt: new Date().toISOString() };
+  const fieldsFound = revsellerFieldsFound(data);
+  const artifacts = fieldsFound ? { panelTextPath } : { ...await saveRevsellerPanelArtifacts(page, panel), panelTextPath };
+  const report = { status: 'success', source: 'RevSeller', pageUrl: url, revsellerPanelVisible: data.revsellerPanelFound, data, artifacts, ...(!fieldsFound ? { warning: 'RevSeller panel was visible, but expected fields were not found in the panel.' } : {}), completedAt: new Date().toISOString() };
   await writeRevsellerAnalysisReport(reportPath, report);
   return report;
 }

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { amazonMatchQuery, extractAmazonProductFromPage, extractRevsellerFields, isAmazonProductPageUrl } from './revseller-integration.mjs';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { amazonMatchQuery, extractAmazonProductFromPage, extractRevsellerFields, extractRevsellerPanelTextFromHtml, isAmazonProductPageUrl, parseRevsellerPanelHtml } from './revseller-integration.mjs';
 
 test('extracts RevSeller panel fields without calculating profitability', () => {
   const result = extractRevsellerFields({
@@ -52,6 +55,23 @@ test('prefers structured RevSeller DOM fields and keeps panel visibility consist
   assert.equal(result.hazmatWarning, 'No hazmat warning');
   assert.equal(result.meltableWarning, 'Meltable');
   assert.equal(result.ipRestrictionWarnings, 'Restriction warning shown');
+});
+
+
+test('parses saved RevSeller panel HTML fixture and exposes raw visible panel text', async () => {
+  const fixturePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../artifacts/amazon/revseller-unavailable.html');
+  const html = await readFile(fixturePath, 'utf8');
+  const panel = parseRevsellerPanelHtml(html, { asin: 'B000000003', productUrl: 'https://www.amazon.com/dp/B000000003' });
+  const result = extractRevsellerFields(panel);
+
+  assert.match(extractRevsellerPanelTextFromHtml(html), /RevSeller/);
+  assert.equal(result.revsellerPanelFound, true);
+  assert.equal(result.sellingPrice, '$18.49');
+  assert.equal(result.fbaFees, '$5.21');
+  assert.equal(result.estimatedProfit, '$3.77');
+  assert.equal(result.roi, '28%');
+  assert.equal(result.bsr, '14,210');
+  assert.equal(result.category, 'Grocery & Gourmet Food');
 });
 
 test('builds reusable Amazon match query from connector product fields', () => {
