@@ -4,12 +4,12 @@ This module owns the single persistent **Google Chrome** profile used by Amazon 
 
 ## Guarantees
 
-- Uses regular Google Chrome through Playwright's persistent-context launcher.
-- Uses the existing configured Chrome `User Data` directory and profile directory; it does not create a temporary, clean, or fresh browser profile.
+- Attaches to an already-running regular Google Chrome session through the Chrome DevTools Protocol (CDP).
+- Uses the existing configured Chrome `User Data` directory and profile directory only for profile/extension inspection; it does not launch Chrome or create a temporary, clean, or fresh browser profile.
 - Reuses cookies plus existing Amazon and RevSeller login sessions from that Chrome profile.
 - Verifies that the RevSeller extension is available in the configured Chrome profile before Amazon analysis starts.
 - Stops with `RevSeller extension is not available in the configured Chrome profile.` when the configured profile does not contain an enabled RevSeller extension.
-- Does not perform automatic login and never stores passwords in code.
+- Does not perform automatic login, never stores passwords in code, and never creates another Chrome window.
 - Exposes one reusable launcher for Amazon Product Discovery, Amazon Matching, and RevSeller.
 
 ## Required configuration
@@ -22,12 +22,11 @@ Set these environment variables before running Amazon or RevSeller automation:
 
 Optional:
 
-- `AMAZON_BROWSER_HEADLESS=true`: run headless. For extension-backed RevSeller analysis, headed Chrome is recommended because Chrome extensions may not behave consistently in headless mode.
 - `AMAZON_CHROME_CDP_ENDPOINT`: optional endpoint for an already-running Chrome session, defaulting to `http://127.0.0.1:9222`.
 
 ## Windows setup
 
-1. Close all Chrome windows that are using the target profile, or make sure no separate Chrome process is locking the profile.
+1. Start your normal Chrome session with `--remote-debugging-port=9222` so CDP attach is available.
 2. In Chrome, open `chrome://version`.
 3. Copy these values:
    - **Executable Path** -> `AMAZON_CHROME_PATH`
@@ -35,7 +34,7 @@ Optional:
      - parent `User Data` folder -> `AMAZON_CHROME_USER_DATA_DIR`
      - final profile folder name (`Default`, `Profile 1`, etc.) -> `AMAZON_CHROME_PROFILE_DIRECTORY`
 4. Confirm that RevSeller is installed and logged in in that exact Chrome profile.
-5. If that Default profile is already open, start that same Chrome session with `--remote-debugging-port=9222` before running automation, or close Chrome. The manager connects to an existing debuggable session or fails clearly; it never creates a temporary profile or a second conflicting instance.
+5. Keep that same Chrome session open. The manager connects to the existing debuggable session or fails clearly; it never launches Chrome, creates a temporary profile, or creates another Chrome window.
 
 PowerShell example:
 
@@ -64,4 +63,4 @@ await page.goto('https://www.amazon.com/');
 await closeAmazonBrowserSession();
 ```
 
-Future Amazon modules should import this module instead of calling `chromium.launch()` or `chromium.launchPersistentContext()` directly. Amazon matching logic, add-to-cart behavior, and purchase behavior are intentionally outside this session manager.
+Future Amazon modules should import this module instead of calling `chromium.launch()` or `chromium.launchPersistentContext()` directly; attach mode is the only supported browser startup path. Amazon matching logic, add-to-cart behavior, and purchase behavior are intentionally outside this session manager.
