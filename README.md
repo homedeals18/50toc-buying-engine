@@ -162,12 +162,24 @@ The launcher stores the dedicated manual Chrome profile under `artifacts/bjs/man
 
 ## RevSeller local integration
 
-The RevSeller integration uses a persistent local Playwright browser profile at `artifacts/revseller/profile` so the operator can authenticate once and reuse that authenticated session on later runs. RevSeller credentials are read only from the repository-root `.env` file and must never be committed:
+The RevSeller integration uses the operator's existing regular Google Chrome profile instead of a clean Playwright Chromium profile. Configure the Chrome profile that already has Amazon logged in and the RevSeller extension installed and logged in:
 
 ```bash
-REVSELLER_EMAIL="operator@example.com"
-REVSELLER_PASSWORD="use-a-local-secret"
+export AMAZON_CHROME_PATH="/path/to/google-chrome"
+export AMAZON_CHROME_USER_DATA_DIR="$HOME/.config/google-chrome"
+export AMAZON_CHROME_PROFILE_DIRECTORY="Default"
 ```
+
+Windows PowerShell setup:
+
+```powershell
+$env:AMAZON_CHROME_PATH = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+$env:AMAZON_CHROME_USER_DATA_DIR = "$env:LOCALAPPDATA\Google\Chrome\User Data"
+$env:AMAZON_CHROME_PROFILE_DIRECTORY = "Default"
+npm run read:revseller
+```
+
+To find the correct Windows values, open `chrome://version` in the exact Chrome profile that has RevSeller installed. Use **Executable Path** for `AMAZON_CHROME_PATH`. Split **Profile Path** so the parent `User Data` folder becomes `AMAZON_CHROME_USER_DATA_DIR` and the final folder name, such as `Default` or `Profile 1`, becomes `AMAZON_CHROME_PROFILE_DIRECTORY`. Close other Chrome windows for that profile before running automation so Chrome can open the configured persistent profile.
 
 Run the RevSeller authenticated Amazon analysis from the repository root:
 
@@ -175,7 +187,7 @@ Run the RevSeller authenticated Amazon analysis from the repository root:
 npm run scrape:revseller
 ```
 
-If the persistent profile is not already authenticated, the automation first attempts login with `REVSELLER_EMAIL` and `REVSELLER_PASSWORD` from `.env` when both are set. If that does not establish an authenticated session, it opens the browser headed and prompts the operator to complete RevSeller login manually once. The saved browser profile is reused for future runs.
+Before analysis starts, the Amazon browser session manager verifies that RevSeller is available in the configured Chrome profile. If it is not, the run stops with `RevSeller extension is not available in the configured Chrome profile.` The automation reuses the configured profile's cookies and existing Amazon/RevSeller sessions; it does not log in automatically, create a temporary profile, add to cart, or purchase.
 
 Authenticated RevSeller data is read only after the session check succeeds. The module is independent from BJ's, Costco, Sam's Club, and the Main Buying Engine. Future connectors can pass product records through a JSON file path, and the module will match each record to Amazon using `amazonUrl`, `productUrl`, `url`, `asin`, `upc`, or the combined `brand productName packageSize` fields:
 
