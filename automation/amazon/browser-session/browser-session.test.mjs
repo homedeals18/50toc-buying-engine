@@ -3,7 +3,7 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { buildLaunchOptions, chromeProfileInUseMessage, closeAmazonBrowserSession, findRevsellerExtension, getAmazonBrowserSession, isChromeProfileInUse, launchAmazonBrowserSession, resolveChromeProfileConfig, revsellerUnavailableMessage, verifyRevsellerExtensionAvailable } from './browser-session.mjs';
+import { buildLaunchOptions, chromeProfileInUseMessage, closeAmazonBrowserSession, findRevsellerExtension, getAmazonBrowserSession, inspectChromeProfileExtensions, isChromeProfileInUse, launchAmazonBrowserSession, resolveChromeProfileConfig, revsellerUnavailableMessage, verifyRevsellerExtensionAvailable } from './browser-session.mjs';
 
 async function createChromeFixture({ withRevseller = true } = {}) {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'amazon-browser-session-'));
@@ -59,6 +59,56 @@ test('finds the RevSeller extension in the configured Chrome profile preferences
     const extension = await findRevsellerExtension(fixture.profilePath);
     assert.equal(extension.extensionId, 'abcdefghijklmnopqrstuvwxyzabcdef');
     assert.equal(extension.source, 'Preferences');
+  } finally {
+    await rm(fixture.tempDir, { recursive: true, force: true });
+  }
+});
+
+test('inspects the configured Chrome profile Extensions directory and resolves localized RevSeller manifests', async () => {
+  const fixture = await createChromeFixture({ withRevseller: false });
+  const extensionId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const extensionVersionPath = path.join(fixture.profilePath, 'Extensions', extensionId, '1.2.3');
+  try {
+    await mkdir(path.join(extensionVersionPath, '_locales', 'en'), { recursive: true });
+    await writeFile(path.join(extensionVersionPath, 'manifest.json'), JSON.stringify({
+      name: '__MSG_appName__',
+      description: 'Amazon FBA calculator and profit tools',
+      default_locale: 'en',
+      content_scripts: [{ matches: ['https://www.amazon.com/*'], js: ['revseller-content.js'] }]
+    }));
+    await writeFile(path.join(extensionVersionPath, '_locales', 'en', 'messages.json'), JSON.stringify({ appName: { message: 'RevSeller' } }));
+
+    const extensions = await inspectChromeProfileExtensions(fixture.profilePath);
+    const extension = await findRevsellerExtension(fixture.profilePath);
+    assert.ok(extensions.some((candidate) => candidate.extensionId === extensionId && candidate.name === 'RevSeller'));
+    assert.equal(extension.extensionId, extensionId);
+    assert.equal(extension.source, 'Extensions directory');
+  } finally {
+    await rm(fixture.tempDir, { recursive: true, force: true });
+  }
+});
+
+test('falls back to live Amazon product page DOM verification when profile inspection misses RevSeller', async () => {
+  const fixture = await createChromeFixture({ withRevseller: false });
+  const calls = [];
+  const fakePage = {
+    goto: async (url) => { calls.push(['goto', url]); },
+    waitForTimeout: async () => {},
+    url: () => 'https://www.amazon.com/dp/B00000JY1X',
+    frames: () => [{
+      evaluate: async () => ({ url: 'https://www.amazon.com/dp/B00000JY1X', matched: [{ tagName: 'DIV', id: 'revseller-root' }], textMentionsRevseller: true })
+    }]
+  };
+  const fakeContext = { pages: () => [fakePage], close: async () => { calls.push(['close']); } };
+  const chromium = {
+    launchPersistentContext: async () => fakeContext
+  };
+
+  try {
+    const context = await launchAmazonBrowserSession({ chromium, ...fixture, launchOptions: { amazonProductUrl: 'https://www.amazon.com/dp/B00000JY1X' } });
+    assert.equal(context, fakeContext);
+    assert.equal(context.amazonBrowserSession.revsellerExtension.source, 'live Amazon product page DOM');
+    assert.deepEqual(calls, [['goto', 'https://www.amazon.com/dp/B00000JY1X']]);
   } finally {
     await rm(fixture.tempDir, { recursive: true, force: true });
   }
