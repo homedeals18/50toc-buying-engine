@@ -7,7 +7,7 @@ export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.met
 export const amazonHomeUrl = 'https://www.amazon.com/';
 export const revsellerHomeUrl = 'https://www.revseller.com/';
 export const revsellerUnavailableMessage = 'RevSeller extension is not available in the configured Chrome profile.';
-export const chromeProfileInUseMessage = 'Configured Chrome profile is already in use. Start that existing Chrome session with --remote-debugging-port=9222 and set AMAZON_CHROME_CDP_ENDPOINT, or close Chrome before running Amazon analysis. The automation will not create a second conflicting Chrome instance or a temporary profile.';
+export const chromeAttachRequiredMessage = 'Chrome attach mode requires an already-running Chrome instance with remote debugging enabled. Start your existing Chrome session with --remote-debugging-port=9222, keep the Amazon and RevSeller logins active in that browser, and set AMAZON_CHROME_CDP_ENDPOINT if you use a non-default endpoint. The automation will not launch Chrome, create another Chrome window, or create a temporary profile.';
 export const defaultAmazonChromeCdpEndpoint = 'http://127.0.0.1:9222';
 export const revsellerVerificationAmazonProductUrl = process.env.REVSELLER_VERIFICATION_AMAZON_PRODUCT_URL ?? 'https://www.amazon.com/dp/B00000JY1X';
 
@@ -54,33 +54,8 @@ export function resolveChromeProfileConfig({ chromePath, userDataDir, profileDir
   };
 }
 
-function profileDirectoryArg(profileDirectory) {
-  return `--profile-directory=${profileDirectory}`;
-}
-
-export function buildLaunchOptions({
-  chromePath = process.env.AMAZON_CHROME_PATH ?? (process.platform === 'win32' ? defaultWindowsChromeConfig.chromePath : undefined),
-  profileDirectory = process.env.AMAZON_CHROME_PROFILE_DIRECTORY ?? (process.platform === 'win32' ? defaultWindowsChromeConfig.profileDirectory : undefined),
-  headless = process.env.AMAZON_BROWSER_HEADLESS === 'true',
-  viewport = { width: 1440, height: 1000 },
-  args = []
-} = {}) {
-  const resolvedProfileDirectory = resolveProfileDirectory(profileDirectory);
-  return {
-    executablePath: resolveChromePath(chromePath),
-    headless,
-    viewport,
-    args: [...new Set(['--disable-dev-shm-usage', '--no-sandbox', profileDirectoryArg(resolvedProfileDirectory), ...args])]
-  };
-}
-
-
-function chromeProfileLockPaths(userDataDir) {
-  return ['SingletonLock', 'SingletonCookie', 'SingletonSocket'].map((name) => path.join(userDataDir, name));
-}
-
-export function isChromeProfileInUse(userDataDir) {
-  return chromeProfileLockPaths(userDataDir).some((lockPath) => existsSync(lockPath));
+export function resolveChromeAttachConfig({ cdpEndpoint = process.env.AMAZON_CHROME_CDP_ENDPOINT ?? defaultAmazonChromeCdpEndpoint } = {}) {
+  return { cdpEndpoint };
 }
 
 async function connectToExistingChromeSession({ chromiumLauncher, cdpEndpoint = process.env.AMAZON_CHROME_CDP_ENDPOINT ?? defaultAmazonChromeCdpEndpoint, config, revsellerExtension, liveVerificationOptions }) {
@@ -114,7 +89,7 @@ async function connectToExistingChromeSession({ chromiumLauncher, cdpEndpoint = 
     return context;
   } catch (error) {
     if (error.message === revsellerUnavailableMessage) throw error;
-    throw new Error(`${chromeProfileInUseMessage} Failed to connect to ${cdpEndpoint}: ${error.message}`);
+    throw new Error(`${chromeAttachRequiredMessage} Failed to connect to ${cdpEndpoint}: ${error.message}`);
   }
 }
 
@@ -123,7 +98,7 @@ async function loadChromium(chromium) {
   try {
     return (await import('playwright')).chromium;
   } catch (error) {
-    throw new Error(`Playwright is required to launch the Amazon browser session. Install playwright or pass a chromium launcher. ${error.message}`);
+    throw new Error(`Playwright is required to attach to the Amazon browser session. Install playwright or pass a chromium launcher. ${error.message}`);
   }
 }
 
@@ -237,41 +212,17 @@ async function verifyRevsellerPresenceFromLiveAmazonPage(context, { amazonProduc
   return { present, source: 'live Amazon product page DOM', pageUrl: page.url(), frameResults };
 }
 
-export async function launchAmazonBrowserSession({ chromium, chromePath, userDataDir, profileDirectory, launchOptions } = {}) {
+export async function launchAmazonBrowserSession({ chromium, chromePath, userDataDir, profileDirectory, cdpEndpoint, launchOptions } = {}) {
   const config = resolveChromeProfileConfig({ chromePath, userDataDir, profileDirectory });
-  let revsellerExtension = await findRevsellerExtension(config.profilePath);
+  const revsellerExtension = await findRevsellerExtension(config.profilePath);
   const chromiumLauncher = await loadChromium(chromium);
-  if (isChromeProfileInUse(config.userDataDir)) {
-    return connectToExistingChromeSession({ chromiumLauncher, config, revsellerExtension, liveVerificationOptions: launchOptions });
-  }
-  let context;
-  try {
-    context = await chromiumLauncher.launchPersistentContext(config.userDataDir, buildLaunchOptions({ chromePath: config.chromePath, profileDirectory: config.profileDirectory, ...launchOptions }));
-  } catch (error) {
-    if (/profile|user data|process|singleton|lock/i.test(error.message)) {
-      throw new Error(`${chromeProfileInUseMessage} Original launch error: ${error.message}`);
-    }
-    throw error;
-  }
-  if (!revsellerExtension) {
-    const liveVerification = await verifyRevsellerPresenceFromLiveAmazonPage(context, launchOptions);
-    if (!liveVerification.present) {
-      await context.close().catch(() => {});
-      throw new Error(revsellerUnavailableMessage);
-    }
-    revsellerExtension = { extensionId: null, name: 'RevSeller', source: liveVerification.source, liveVerification };
-  }
-  context.amazonBrowserSession = {
-    chromePath: config.chromePath,
-    userDataDir: config.userDataDir,
-    profileDirectory: config.profileDirectory,
-    profilePath: config.profilePath,
+  return connectToExistingChromeSession({
+    chromiumLauncher,
+    cdpEndpoint: resolveChromeAttachConfig({ cdpEndpoint }).cdpEndpoint,
+    config,
     revsellerExtension,
-    persistent: true,
-    autoLogin: false,
-    sharedFor: ['amazon-product-discovery', 'amazon-matching', 'revseller']
-  };
-  return context;
+    liveVerificationOptions: launchOptions
+  });
 }
 
 export async function getAmazonBrowserSession(options = {}) {

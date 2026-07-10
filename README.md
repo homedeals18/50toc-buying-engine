@@ -131,7 +131,7 @@ For first-time authentication, run headed so you can complete BJ's login manuall
 
 ### BJ's manual Chrome mode
 
-Use manual Chrome mode when you want the BJ's workflow to reuse a regular Chrome window. The launcher starts regular Google Chrome with remote debugging enabled, waits for Chrome to expose the debugging endpoint, and then runs the BJ's deal scraper against that Chrome session. Sign in to BJ's in the launched Chrome window if prompted.
+Use manual Chrome mode when you want the BJ's workflow to attach to your already-running regular Chrome session. The runner never starts Chrome and never creates another Chrome window; it first checks that Chrome exposes the debugging endpoint, then runs the BJ's deal scraper inside that existing browser session. Start Chrome yourself with `--remote-debugging-port=9222` and sign in to BJ's in that browser before running the scraper.
 
 Run from the repository root:
 
@@ -145,24 +145,11 @@ If Windows reports a spawn `EINVAL` error through `npm`, use the direct Node lau
 node automation/bjs/run-bjs-deals-manual-chrome.js
 ```
 
-On Windows, the launcher uses `child_process.spawn` directly with the Chrome executable path. It checks the default 64-bit Chrome install first and then the 32-bit and per-user installs:
-
-- `%ProgramFiles%\Google\Chrome\Application\chrome.exe`
-- `%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe`
-- `%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe`
-
-If Chrome is installed somewhere else, set `BJS_CHROME_PATH` in PowerShell before running the scraper:
-
-```powershell
-$env:BJS_CHROME_PATH = "D:\Apps\Google\Chrome\Application\chrome.exe"
-npm run scrape:bjs:deals:manual-chrome
-```
-
-The launcher stores the dedicated manual Chrome profile under `artifacts/bjs/manual-chrome-profile` by default. Override it with `BJS_MANUAL_CHROME_PROFILE_DIR` if you want to reuse a different profile folder. The manual script connects to `http://127.0.0.1:9222` by default; override it with `BJS_CHROME_CDP_ENDPOINT` if you use a different host or port. To connect to a Chrome instance that you already started yourself, set `BJS_SKIP_CHROME_LAUNCH=true` and make sure that Chrome was started with a matching `--remote-debugging-port`. The normal Playwright launch mode remains available as the fallback with `./scripts/run-bjs-deals-test.sh`.
+The manual script connects to `http://127.0.0.1:9222` by default; override it with `BJS_CHROME_CDP_ENDPOINT` if you use a different host or port. If Chrome was not started with remote debugging enabled, the script exits with setup instructions instead of launching Chrome or creating a dedicated profile. The normal Playwright launch mode remains available as the fallback with `./scripts/run-bjs-deals-test.sh`.
 
 ## RevSeller local integration
 
-The RevSeller integration uses the operator's existing regular Google Chrome profile instead of a clean Playwright Chromium profile. Configure the Chrome profile that already has Amazon logged in and the RevSeller extension installed and logged in:
+The RevSeller integration attaches to the operator's already-running regular Google Chrome session through CDP instead of launching a persistent profile. Configure the Chrome profile that already has Amazon logged in and the RevSeller extension installed and logged in, then start that same Chrome session with `--remote-debugging-port=9222` before running automation:
 
 ```bash
 export AMAZON_CHROME_PATH="/path/to/google-chrome"
@@ -179,7 +166,7 @@ $env:AMAZON_CHROME_PROFILE_DIRECTORY = "Default"
 npm run read:revseller
 ```
 
-To find the correct Windows values, open `chrome://version` in the exact Chrome profile that has RevSeller installed. Use **Executable Path** for `AMAZON_CHROME_PATH`. Split **Profile Path** so the parent `User Data` folder becomes `AMAZON_CHROME_USER_DATA_DIR` and the final folder name, such as `Default` or `Profile 1`, becomes `AMAZON_CHROME_PROFILE_DIRECTORY`. If that Default profile is already open, start the existing Chrome session with `--remote-debugging-port=9222` and set `AMAZON_CHROME_CDP_ENDPOINT` if you use a non-default endpoint; otherwise close Chrome before running automation. The session manager connects to the existing debuggable Chrome session or fails clearly, and never creates a second conflicting instance or temporary profile.
+To find the correct Windows values, open `chrome://version` in the exact Chrome profile that has RevSeller installed. Use **Executable Path** for `AMAZON_CHROME_PATH`. Split **Profile Path** so the parent `User Data` folder becomes `AMAZON_CHROME_USER_DATA_DIR` and the final folder name, such as `Default` or `Profile 1`, becomes `AMAZON_CHROME_PROFILE_DIRECTORY`. Start that existing Chrome session with `--remote-debugging-port=9222` and set `AMAZON_CHROME_CDP_ENDPOINT` if you use a non-default endpoint. The session manager connects to the existing debuggable Chrome session or fails clearly, and never launches Chrome, creates a second window, or creates a temporary profile.
 
 Run the RevSeller authenticated Amazon analysis from the repository root:
 
@@ -187,7 +174,7 @@ Run the RevSeller authenticated Amazon analysis from the repository root:
 npm run scrape:revseller
 ```
 
-Before analysis starts, the Amazon browser session manager inspects the configured Chrome profile's `Extensions` directory and logs detected extension IDs and names while looking for RevSeller by manifest/name/content signals. If profile inspection does not find RevSeller, it launches Chrome with the configured user data directory and profile directory, opens an Amazon product page, and checks the live page DOM for RevSeller. The run stops with `RevSeller extension is not available in the configured Chrome profile.` only when both profile inspection and live-page verification fail. The automation reuses the configured profile's cookies and existing Amazon/RevSeller sessions; it does not log in automatically, create a temporary profile, add to cart, or purchase.
+Before analysis starts, the Amazon browser session manager inspects the configured Chrome profile's `Extensions` directory and logs detected extension IDs and names while looking for RevSeller by manifest/name/content signals. If profile inspection does not find RevSeller, it attaches to the existing CDP-enabled Chrome session, opens an Amazon product page in that session, and checks the live page DOM for RevSeller. The run stops with `RevSeller extension is not available in the configured Chrome profile.` only when both profile inspection and live-page verification fail. The automation reuses the configured profile's cookies and existing Amazon/RevSeller sessions; it does not log in automatically, create a temporary profile, add to cart, or purchase.
 
 Authenticated RevSeller data is read only after the session check succeeds. The module is independent from BJ's, Costco, Sam's Club, and the Main Buying Engine. Future connectors can pass product records through a JSON file path, and the module will match each record to Amazon using `amazonUrl`, `productUrl`, `url`, `asin`, `upc`, or the combined `brand productName packageSize` fields:
 

@@ -3,7 +3,7 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { buildLaunchOptions, chromeProfileInUseMessage, closeAmazonBrowserSession, findRevsellerExtension, getAmazonBrowserSession, inspectChromeProfileExtensions, isChromeProfileInUse, launchAmazonBrowserSession, resolveChromeProfileConfig, revsellerUnavailableMessage, verifyRevsellerExtensionAvailable } from './browser-session.mjs';
+import { chromeAttachRequiredMessage, closeAmazonBrowserSession, findRevsellerExtension, getAmazonBrowserSession, inspectChromeProfileExtensions, launchAmazonBrowserSession, resolveChromeAttachConfig, resolveChromeProfileConfig, revsellerUnavailableMessage, verifyRevsellerExtensionAvailable } from './browser-session.mjs';
 
 async function createChromeFixture({ withRevseller = true } = {}) {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'amazon-browser-session-'));
@@ -39,18 +39,9 @@ test('resolves configured Chrome profile paths without creating a fresh profile'
   }
 });
 
-test('builds regular Chrome persistent launch options with profile directory', async () => {
-  const fixture = await createChromeFixture();
-  try {
-    assert.deepEqual(buildLaunchOptions({ chromePath: fixture.chromePath, profileDirectory: fixture.profileDirectory, args: ['--custom-flag'] }), {
-      executablePath: fixture.chromePath,
-      headless: false,
-      viewport: { width: 1440, height: 1000 },
-      args: ['--disable-dev-shm-usage', '--no-sandbox', '--profile-directory=Default', '--custom-flag']
-    });
-  } finally {
-    await rm(fixture.tempDir, { recursive: true, force: true });
-  }
+test('resolves Chrome attach endpoint without launch options', () => {
+  assert.deepEqual(resolveChromeAttachConfig(), { cdpEndpoint: 'http://127.0.0.1:9222' });
+  assert.deepEqual(resolveChromeAttachConfig({ cdpEndpoint: 'http://127.0.0.1:9333' }), { cdpEndpoint: 'http://127.0.0.1:9333' });
 });
 
 test('finds the RevSeller extension in the configured Chrome profile preferences', async () => {
@@ -101,7 +92,7 @@ test('falls back to live Amazon product page DOM verification when profile inspe
   };
   const fakeContext = { pages: () => [fakePage], close: async () => { calls.push(['close']); } };
   const chromium = {
-    launchPersistentContext: async () => fakeContext
+    connectOverCDP: async () => ({ contexts: () => [fakeContext], close: async () => {} })
   };
 
   try {
@@ -123,25 +114,25 @@ test('stops with a clear message when RevSeller is not available', async () => {
   }
 });
 
-test('launches regular Chrome with the configured persistent user data dir and profile directory', async () => {
+test('attaches to Chrome over CDP and never launches a persistent profile', async () => {
   const fixture = await createChromeFixture();
   const calls = [];
   const fakeContext = { pages: () => [], close: async () => {} };
   const chromium = {
-    launchPersistentContext: async (userDataDir, options) => {
-      calls.push({ userDataDir, options });
-      return fakeContext;
+    connectOverCDP: async (endpoint) => {
+      calls.push(endpoint);
+      return { contexts: () => [fakeContext], close: async () => {} };
+    },
+    launchPersistentContext: async () => {
+      throw new Error('must not launch Chrome');
     }
   };
 
   try {
-    const context = await launchAmazonBrowserSession({ chromium, ...fixture, launchOptions: { headless: true } });
+    const context = await launchAmazonBrowserSession({ chromium, ...fixture, cdpEndpoint: 'http://127.0.0.1:9333' });
     assert.equal(context, fakeContext);
-    assert.equal(calls[0].userDataDir, fixture.userDataDir);
-    assert.equal(calls[0].options.executablePath, fixture.chromePath);
-    assert.equal(calls[0].options.headless, true);
-    assert.ok(calls[0].options.args.includes('--profile-directory=Default'));
-    assert.equal(context.amazonBrowserSession.persistent, true);
+    assert.deepEqual(calls, ['http://127.0.0.1:9333']);
+    assert.equal(context.amazonBrowserSession.connectedOverCDP, true);
     assert.equal(context.amazonBrowserSession.autoLogin, false);
     assert.equal(context.amazonBrowserSession.revsellerExtension.extensionId, 'abcdefghijklmnopqrstuvwxyzabcdef');
   } finally {
@@ -150,9 +141,8 @@ test('launches regular Chrome with the configured persistent user data dir and p
 });
 
 
-test('connects to an existing Chrome session instead of launching a conflicting profile', async () => {
+test('connects to an existing Chrome session even when profile lock files exist', async () => {
   const fixture = await createChromeFixture();
-  await writeFile(path.join(fixture.userDataDir, 'SingletonLock'), 'locked');
   const fakeContext = { pages: () => [], close: async () => {} };
   const calls = [];
   const chromium = {
@@ -166,7 +156,6 @@ test('connects to an existing Chrome session instead of launching a conflicting 
   };
 
   try {
-    assert.equal(isChromeProfileInUse(fixture.userDataDir), true);
     const context = await launchAmazonBrowserSession({ chromium, ...fixture });
     assert.equal(context, fakeContext);
     assert.deepEqual(calls, ['http://127.0.0.1:9222']);
@@ -177,9 +166,8 @@ test('connects to an existing Chrome session instead of launching a conflicting 
   }
 });
 
-test('fails clearly when the configured Chrome profile is in use but cannot be connected', async () => {
+test('fails clearly when Chrome cannot be attached over CDP', async () => {
   const fixture = await createChromeFixture();
-  await writeFile(path.join(fixture.userDataDir, 'SingletonLock'), 'locked');
   const chromium = {
     connectOverCDP: async () => {
       throw new Error('connection refused');
@@ -189,7 +177,7 @@ test('fails clearly when the configured Chrome profile is in use but cannot be c
   try {
     await assert.rejects(
       () => launchAmazonBrowserSession({ chromium, ...fixture }),
-      (error) => error.message.includes(chromeProfileInUseMessage) && error.message.includes('connection refused')
+      (error) => error.message.includes(chromeAttachRequiredMessage) && error.message.includes('connection refused')
     );
   } finally {
     await rm(fixture.tempDir, { recursive: true, force: true });
@@ -201,9 +189,9 @@ test('reuses the same context promise until closed', async () => {
   let launches = 0;
   let closes = 0;
   const chromium = {
-    launchPersistentContext: async () => {
+    connectOverCDP: async () => {
       launches += 1;
-      return { pages: () => [], close: async () => { closes += 1; } };
+      return { contexts: () => [{ pages: () => [], close: async () => { closes += 1; } }], close: async () => {} };
     }
   };
 
