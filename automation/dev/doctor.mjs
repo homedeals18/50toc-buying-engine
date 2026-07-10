@@ -113,20 +113,44 @@ export async function runDoctor({ root = repoRoot, env = process.env, fetchImpl 
   return checks;
 }
 
+const doctorReportRows = [
+  ['Node', ['Node']],
+  ['npm', ['npm']],
+  ['Chrome', ['Chrome executable']],
+  ['Chrome Profile', ['Chrome profile path']],
+  ['RevSeller', ['RevSeller extension presence']],
+  ['Amazon Login', ['Amazon login']],
+  ['Remote Debugging', ['Remote debugging endpoint on port 9222']],
+  ['Artifacts', ['Required artifact folders']]
+];
+
+function statusForReportRow(checks, checkNames) {
+  const matched = checks.filter((check) => checkNames.includes(check.name));
+  if (matched.length === 0) return 'FAIL';
+  return matched.every((check) => check.status === 'PASS') ? 'PASS' : 'FAIL';
+}
+
 export function printDoctorResults(checks, { log = console.log } = {}) {
-  log('\n50TOC Buying Engine Doctor Results');
-  log('==================================');
-  for (const check of checks) {
-    log(`${check.status} ${check.name}`);
-    if (check.detail) log(`  ${check.detail}`);
-    if (check.status === 'FAIL' && check.fix) log(`  Fix: ${check.fix}`);
+  log('================================');
+  log('50TOC Doctor');
+  log('================================');
+  log('');
+  let failures = 0;
+  for (const [label, checkNames] of doctorReportRows) {
+    const status = statusForReportRow(checks, checkNames);
+    if (status === 'FAIL') failures += 1;
+    log(`${label.padEnd(21, '.')} ${status}`);
   }
-  const failures = checks.filter((check) => check.status === 'FAIL').length;
-  log(`\nSummary: ${checks.length - failures} PASS, ${failures} FAIL`);
+  log('');
+  log('================================');
   return failures;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+function isDirectRun() {
+  return process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+}
+
+if (isDirectRun()) {
   const checks = await runDoctor();
   process.exitCode = printDoctorResults(checks) === 0 ? 0 : 1;
 }
