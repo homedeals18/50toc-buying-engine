@@ -76,12 +76,28 @@ function firstNonEmpty(...values) {
   return values.find((value) => String(value ?? '').trim()) ?? null;
 }
 
+function textFromVisibleTextCandidates(visibleTextCandidates = []) {
+  return [...new Set(visibleTextCandidates.flatMap((candidate) => [
+    candidate?.text,
+    ...(Array.isArray(candidate?.textNodes) ? candidate.textNodes : [])
+  ]).map((value) => String(value ?? '').trim()).filter(Boolean))].join(' ');
+}
+
+function rawPanelTextFromPanel(panel = {}) {
+  return String(firstNonEmpty(
+    panel.panelText,
+    textFromVisibleTextCandidates(panel.diagnostics?.visibleTextCandidates),
+    textFromVisibleTextCandidates(panel.frameDebug?.[0]?.diagnostics?.visibleTextCandidates),
+    textFromVisibleTextCandidates(panel.visibleTextCandidates)
+  ) ?? '');
+}
+
 function hasExtractedRevsellerValues(data) {
   return Boolean(data.sellingPrice || data.fbaFees || data.estimatedProfit || data.roi || data.bsr || data.category || data.hazmatWarning || data.meltableWarning || data.ipRestrictionWarnings);
 }
 
-export function extractRevsellerFields({ panelText, asin, productTitle, productUrl, fields = {}, panelFound } = {}) {
-  const text = String(panelText ?? '');
+export function extractRevsellerFields({ panelText, asin, productTitle, productUrl, fields = {}, panelFound, diagnostics, frameDebug, visibleTextCandidates } = {}) {
+  const text = rawPanelTextFromPanel({ panelText, diagnostics, frameDebug, visibleTextCandidates });
   const found = panelFound ?? Boolean(text.trim() || Object.values(fields).some((value) => String(value ?? '').trim()));
   const extractedAsin = firstNonEmpty(fields.asin, valueAfterLabel(text, 'ASIN'), text.match(/\b[A-Z0-9]{10}\b/)?.[0], asin);
   const priceText = firstNonEmpty(fields.sellingPrice, fields.currentAmazonPrice, valueAfterLabel(text, '(?:Selling Price|Sell Price|Current Amazon Price|Amazon Price|Price)'));
@@ -373,7 +389,7 @@ export async function detectRevsellerPanel(page, { timeoutMs = 15_000 } = {}) {
 
 export async function saveRevsellerPanelTextArtifact(panel, { panelTextPath = revsellerPanelTextPath } = {}) {
   await mkdir(path.dirname(panelTextPath), { recursive: true });
-  await writeFile(panelTextPath, (panel?.panelTextNodes?.length ? panel.panelTextNodes.join('\n') : panel?.panelText || '').trimEnd() + '\n');
+  await writeFile(panelTextPath, rawPanelTextFromPanel(panel));
   return panelTextPath;
 }
 
