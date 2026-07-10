@@ -9,6 +9,8 @@ export const revsellerArtifactRoot = path.resolve(process.cwd(), '../../artifact
 export const revsellerReaderReportPath = path.join(revsellerArtifactRoot, 'revseller-analysis-report.json');
 export const revsellerMissingScreenshotPath = path.join(revsellerArtifactRoot, 'revseller-panel-not-visible.png');
 export const revsellerMissingHtmlPath = path.join(revsellerArtifactRoot, 'revseller-panel-not-visible.html');
+export const revsellerFieldsMissingScreenshotPath = path.join(revsellerArtifactRoot, 'revseller-panel-fields-missing.png');
+export const revsellerFieldsMissingHtmlPath = path.join(revsellerArtifactRoot, 'revseller-panel-fields-missing.html');
 
 export function parseMoney(value) {
   const match = String(value ?? '').match(/-?\$?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)/);
@@ -20,43 +22,94 @@ export function parsePercent(value) {
   return match ? Number(match[1]) : null;
 }
 
+const revsellerFieldLabels = [
+  'ASIN',
+  'Product Title',
+  'Title',
+  'Selling Price',
+  'Sell Price',
+  'Current Amazon Price',
+  'Amazon Price',
+  'Price',
+  'FBA Fees',
+  'FBA Fee',
+  'Fees',
+  'Estimated Profit',
+  'Est. Profit',
+  'Net Profit',
+  'Profit',
+  'ROI',
+  'BSR',
+  'Best Sellers Rank',
+  'Sales Rank',
+  'Rank',
+  'Category',
+  'Hazmat',
+  'Meltable',
+  'IP / Restriction warnings',
+  'IP Alert',
+  'IP Warning',
+  'Restriction warnings',
+  'Restrictions',
+  'Variation'
+];
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function valueAfterLabel(text, labelPattern) {
   const source = String(text ?? '').replace(/\s+/g, ' ').trim();
-  const match = source.match(new RegExp(`${labelPattern}\\s*:?\\s*([^|•\\n]+?)(?=\\s+(?:ASIN|Product Title|Title|Selling Price|Current Amazon Price|Amazon Price|Price|FBA Fees?|Fees?|Estimated Profit|Profit|ROI|BSR|Rank|Category|Hazmat|Meltable|IP / Restriction warnings?|IP Alert|IP Warning|Restriction warnings?|Restrictions?|Variation)\\b|$)`, 'i'));
+  if (!source) return null;
+  const nextLabels = revsellerFieldLabels.map(escapeRegExp).join('|');
+  const match = source.match(new RegExp(`(?:${labelPattern})\\s*:?\\s*([^|•\\n]+?)(?=\\s+(?:${nextLabels})\\b|$)`, 'i'));
   return match?.[1]?.trim() || null;
 }
 
-export function extractRevsellerFields({ panelText, asin, productTitle, productUrl }) {
+function firstNonEmpty(...values) {
+  return values.find((value) => String(value ?? '').trim()) ?? null;
+}
+
+function hasExtractedRevsellerValues(data) {
+  return Boolean(data.sellingPrice || data.fbaFees || data.estimatedProfit || data.roi || data.bsr || data.category || data.hazmatWarning || data.meltableWarning || data.ipRestrictionWarnings);
+}
+
+export function extractRevsellerFields({ panelText, asin, productTitle, productUrl, fields = {}, panelFound } = {}) {
   const text = String(panelText ?? '');
-  const extractedAsin = valueAfterLabel(text, 'ASIN') || text.match(/\b[A-Z0-9]{10}\b/)?.[0] || asin || null;
-  const priceText = valueAfterLabel(text, '(?:Selling Price|Current Amazon Price|Amazon Price|Price)');
-  const feeText = valueAfterLabel(text, '(?:FBA Fees?|Fees?)');
-  const profitText = valueAfterLabel(text, '(?:Estimated Profit|Profit)');
-  const roiText = valueAfterLabel(text, 'ROI');
-  const hazmatText = valueAfterLabel(text, 'Hazmat');
-  const meltableText = valueAfterLabel(text, 'Meltable');
-  const ipText = valueAfterLabel(text, '(?:IP / Restriction warnings?|IP Alert|IP Warning|Restriction warnings?|Restrictions?)');
+  const found = panelFound ?? Boolean(text.trim() || Object.values(fields).some((value) => String(value ?? '').trim()));
+  const extractedAsin = firstNonEmpty(fields.asin, valueAfterLabel(text, 'ASIN'), text.match(/\b[A-Z0-9]{10}\b/)?.[0], asin);
+  const priceText = firstNonEmpty(fields.sellingPrice, fields.currentAmazonPrice, valueAfterLabel(text, '(?:Selling Price|Sell Price|Current Amazon Price|Amazon Price|Price)'));
+  const feeText = firstNonEmpty(fields.fbaFees, valueAfterLabel(text, '(?:FBA Fees?|Fees?)'));
+  const profitText = firstNonEmpty(fields.estimatedProfit, valueAfterLabel(text, '(?:Estimated Profit|Est\\.? Profit|Net Profit|Profit)'));
+  const roiText = firstNonEmpty(fields.roi, valueAfterLabel(text, 'ROI'));
+  const hazmatText = firstNonEmpty(fields.hazmatWarning, valueAfterLabel(text, 'Hazmat'));
+  const meltableText = firstNonEmpty(fields.meltableWarning, valueAfterLabel(text, 'Meltable'));
+  const ipText = firstNonEmpty(fields.ipRestrictionWarnings, valueAfterLabel(text, '(?:IP / Restriction warnings?|IP Alert|IP Warning|Restriction warnings?|Restrictions?)'));
   return {
     asin: extractedAsin,
-    productTitle: valueAfterLabel(text, '(?:Product Title|Title)') || productTitle || null,
+    productTitle: firstNonEmpty(fields.productTitle, valueAfterLabel(text, '(?:Product Title|Title)'), productTitle),
     productUrl: productUrl || null,
     sellingPrice: priceText || null,
     currentAmazonPrice: parseMoney(priceText),
     fbaFees: feeText || null,
     estimatedProfit: profitText || null,
     roi: roiText || null,
-    bsr: valueAfterLabel(text, '(?:BSR|Rank)'),
-    category: valueAfterLabel(text, 'Category'),
+    bsr: firstNonEmpty(fields.bsr, valueAfterLabel(text, '(?:BSR|Best Sellers Rank|Sales Rank|Rank)')),
+    category: firstNonEmpty(fields.category, valueAfterLabel(text, 'Category')),
     hazmatWarning: hazmatText || null,
     meltableWarning: meltableText || null,
     ipRestrictionWarnings: ipText || null,
     hazmat: hazmatText || null,
     meltable: meltableText || null,
     ipAlert: ipText || null,
-    variation: valueAfterLabel(text, 'Variation'),
-    revsellerPanelFound: Boolean(text.trim()),
-    profitabilitySource: text.trim() ? 'RevSeller' : null
+    variation: firstNonEmpty(fields.variation, valueAfterLabel(text, 'Variation')),
+    revsellerPanelFound: Boolean(found),
+    profitabilitySource: found ? 'RevSeller' : null
   };
+}
+
+export function revsellerFieldsFound(data) {
+  return hasExtractedRevsellerValues(data);
 }
 
 export async function writeRevsellerAnalysisReport(reportPath, report, env) {
@@ -147,9 +200,54 @@ export async function readRevsellerPanel(page) {
     const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
     const asin = location.href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.[1] || document.querySelector('[name="ASIN"]')?.value || null;
     const productTitle = clean(document.querySelector('#productTitle')?.textContent || document.title);
-    const nodes = [...document.querySelectorAll('[id*="revseller" i], [class*="revseller" i], iframe[src*="revseller" i]')];
-    const panelText = clean(nodes.map((node) => node.innerText || node.textContent || node.getAttribute('src')).filter(Boolean).join(' '));
-    return { asin, productTitle, productUrl: location.href, panelText };
+    const selector = '[id*="revseller" i], [class*="revseller" i], [data-testid*="revseller" i], [aria-label*="revseller" i], iframe[src*="revseller" i], [id*="rs-" i], [class*="rs-" i]';
+    const labels = ['sell price', 'selling price', 'fba fee', 'estimated profit', 'net profit', 'roi', 'bsr', 'sales rank', 'hazmat', 'meltable', 'ip alert', 'restriction'];
+    const candidates = [...document.querySelectorAll(selector)];
+    for (const node of [...document.querySelectorAll('aside, section, div, table')]) {
+      const text = clean(node.innerText || node.textContent) || '';
+      const hits = labels.filter((label) => text.toLowerCase().includes(label)).length;
+      if (hits >= 3 && text.length < 12000) candidates.push(node);
+    }
+    const unique = [...new Set(candidates)].filter((node) => node?.isConnected);
+    const scored = unique.map((node, index) => {
+      const text = clean(node.innerText || node.textContent || node.getAttribute('src')) || '';
+      const score = labels.filter((label) => text.toLowerCase().includes(label)).length + (/revseller/i.test(`${node.id} ${node.className} ${node.getAttribute?.('src') || ''}`) ? 10 : 0);
+      return { node, text, score, index };
+    }).filter((entry) => entry.text).sort((a, b) => b.score - a.score || a.text.length - b.text.length || a.index - b.index);
+    const panelNode = scored[0]?.node || null;
+    const panelText = clean(scored.map((entry) => entry.text).join(' '));
+    const panelHtml = panelNode?.outerHTML || null;
+
+    const fieldPatterns = {
+      sellingPrice: /(?:selling|sell|amazon)\s*price/i,
+      fbaFees: /(?:fba\s*fees?|fees?)/i,
+      estimatedProfit: /(?:estimated|est\.?|net)?\s*profit/i,
+      roi: /\broi\b/i,
+      bsr: /\b(?:bsr|best sellers rank|sales rank|rank)\b/i,
+      category: /category/i,
+      hazmatWarning: /hazmat/i,
+      meltableWarning: /meltable/i,
+      ipRestrictionWarnings: /\b(?:ip|restriction|restricted)\b/i,
+      variation: /variation/i
+    };
+    const fieldNames = Object.keys(fieldPatterns);
+    const allPanelElements = panelNode ? [...panelNode.querySelectorAll('*')].sort((a, b) => (clean(a.innerText || a.textContent)?.length || 0) - (clean(b.innerText || b.textContent)?.length || 0)) : [];
+    const readNearbyValue = (element, fieldName) => {
+      const row = element.closest('tr, li, [role="row"], .row, [class*="row" i], [class*="line" i], div') || element;
+      const rowText = clean(row.innerText || row.textContent) || '';
+      const labelText = clean(element.innerText || element.textContent) || '';
+      const withoutLabel = clean(rowText.replace(labelText, ''));
+      const explicit = rowText.match(new RegExp(`${labelText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:?\\s*(.+)$`, 'i'))?.[1];
+      const sibling = clean(element.nextElementSibling?.innerText || element.nextElementSibling?.textContent);
+      return clean(sibling || explicit || withoutLabel || (fieldName === 'ipRestrictionWarnings' || fieldName.endsWith('Warning') ? rowText : null));
+    };
+    const fields = {};
+    for (const fieldName of fieldNames) {
+      const match = allPanelElements.find((element) => fieldPatterns[fieldName].test(clean(element.innerText || element.textContent) || ''));
+      const value = match ? readNearbyValue(match, fieldName) : null;
+      if (value) fields[fieldName] = value;
+    }
+    return { asin, productTitle, productUrl: location.href, panelText, panelHtml, fields, panelFound: Boolean(panelNode || panelText) };
   });
 }
 
@@ -193,6 +291,19 @@ export async function saveRevsellerNotVisibleArtifacts(page, { screenshotPath = 
   return { screenshotPath, htmlPath };
 }
 
+
+export async function saveRevsellerPanelArtifacts(page, panel, { screenshotPath = revsellerFieldsMissingScreenshotPath, htmlPath = revsellerFieldsMissingHtmlPath } = {}) {
+  await mkdir(path.dirname(screenshotPath), { recursive: true });
+  const selector = revsellerPanelSelectors.join(', ');
+  const locator = page.locator(selector).first();
+  const screenshotSaved = await locator.screenshot({ path: screenshotPath }).then(() => true).catch(async () => {
+    await page.screenshot({ path: screenshotPath, fullPage: false });
+    return false;
+  });
+  await writeFile(htmlPath, panel?.panelHtml || '<!-- RevSeller panel HTML was not available. -->');
+  return { screenshotPath, htmlPath, panelOnly: Boolean(panel?.panelHtml), screenshotPanelOnly: screenshotSaved };
+}
+
 export async function readRevsellerFromOpenAmazonPage(context, { reportPath = revsellerReaderReportPath } = {}) {
   const page = await findOpenAmazonProductPage(context);
   const url = page.url();
@@ -212,7 +323,9 @@ export async function readRevsellerFromOpenAmazonPage(context, { reportPath = re
   }
 
   const panel = await readRevsellerPanel(page);
-  const report = { status: 'success', source: 'RevSeller', pageUrl: url, revsellerPanelVisible: true, data: extractRevsellerFields(panel), completedAt: new Date().toISOString() };
+  const data = extractRevsellerFields({ ...panel, panelFound: true });
+  const artifacts = revsellerFieldsFound(data) ? undefined : await saveRevsellerPanelArtifacts(page, panel);
+  const report = { status: 'success', source: 'RevSeller', pageUrl: url, revsellerPanelVisible: data.revsellerPanelFound, data, ...(artifacts ? { artifacts, warning: 'RevSeller panel was visible, but expected fields were not found in the panel.' } : {}), completedAt: new Date().toISOString() };
   await writeRevsellerAnalysisReport(reportPath, report);
   return report;
 }
