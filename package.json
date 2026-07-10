@@ -16,6 +16,7 @@
     "read:revseller": "npm --prefix automation/revseller run read:open-page",
     "run:decision-engine": "node automation/decision-engine/decision-engine.mjs",
     "run:orchestrator": "node automation/orchestrator/orchestrator.mjs",
-    "test:orchestrator": "node --test automation/orchestrator/orchestrator.test.mjs"
+    "test:orchestrator": "node --test automation/orchestrator/orchestrator.test.mjs",
+    "amazon:attach-check": "node automation/amazon/attach-check.mjs"
   }
 }
