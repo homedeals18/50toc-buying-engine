@@ -17,6 +17,9 @@ export const revsellerFieldsMissingHtmlPath = path.join(revsellerArtifactRoot, '
 export const amazonRevsellerFrameDebugPath = path.join(amazonArtifactRoot, 'revseller-frame-debug.json');
 export const amazonRevsellerPanelTextPath = path.join(amazonArtifactRoot, 'revseller-panel-text.txt');
 export const revsellerPanelTextPath = amazonRevsellerPanelTextPath;
+export const revsellerRootHtmlPath = path.join(revsellerArtifactRoot, 'revseller-root.html');
+export const revsellerRootTextPath = path.join(revsellerArtifactRoot, 'revseller-root-text.txt');
+export const revsellerRootCandidatesPath = path.join(revsellerArtifactRoot, 'revseller-root-candidates.json');
 
 export function parseMoney(value) {
   const match = String(value ?? '').match(/-?\$?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)/);
@@ -218,6 +221,25 @@ export async function openConfidentAmazonMatch(page, product) {
 
 function revsellerPanelBrowserReader() {
   const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
+  const extensionSpecificSelectors = [
+    '[id*="revseller" i]',
+    '[class*="revseller" i]',
+    '[data-testid*="revseller" i]',
+    '[data-test*="revseller" i]',
+    '[data-extension*="revseller" i]',
+    '[data-extension-id*="revseller" i]',
+    '[data-chrome-extension*="revseller" i]',
+    '[aria-label*="revseller" i]',
+    'iframe[src*="revseller" i]',
+    'iframe[src^="chrome-extension://"]',
+    '[id^="rs-"]',
+    '[class^="rs-"]',
+    '[class*=" rs-"]',
+    '[data-rs]',
+    '[data-rs-root]',
+    '[data-revseller]'
+  ];
+  const selector = extensionSpecificSelectors.join(', ');
   const visibleTextNodes = (root) => {
     const nodes = [];
     const isVisibleElement = (element) => {
@@ -225,7 +247,7 @@ function revsellerPanelBrowserReader() {
       const style = getComputedStyle(element);
       if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
       const rect = element.getBoundingClientRect();
-      return rect.width > 0 || rect.height > 0 || element.tagName === 'IFRAME';
+      return rect.width > 0 || rect.height > 0 || element.tagName === 'IFRAME' || element === document.body || element === document.documentElement;
     };
     const visit = (node) => {
       if (!node) return;
@@ -243,10 +265,31 @@ function revsellerPanelBrowserReader() {
     visit(root);
     return nodes;
   };
+  const cssPath = (node) => {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return null;
+    const segments = [];
+    let current = node;
+    while (current && current.nodeType === Node.ELEMENT_NODE) {
+      let segment = current.tagName.toLowerCase();
+      if (current.id) segment += `#${CSS.escape(current.id)}`;
+      const classNames = String(current.className || '').split(/\s+/).filter(Boolean).slice(0, 3);
+      if (!current.id && classNames.length) segment += classNames.map((name) => `.${CSS.escape(name)}`).join('');
+      const parent = current.parentElement;
+      if (parent && !current.id) {
+        const sameTagSiblings = [...parent.children].filter((child) => child.tagName === current.tagName);
+        if (sameTagSiblings.length > 1) segment += `:nth-of-type(${sameTagSiblings.indexOf(current) + 1})`;
+      }
+      segments.unshift(segment);
+      if (current.id) break;
+      current = parent;
+    }
+    return segments.join(' > ');
+  };
+  const matchedSelectors = (node) => extensionSpecificSelectors.filter((candidateSelector) => {
+    try { return node.matches(candidateSelector); } catch { return false; }
+  });
   const asin = location.href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.[1] || document.querySelector('[name="ASIN"]')?.value || null;
   const productTitle = clean(document.querySelector('#productTitle')?.textContent || document.title);
-  const selector = '[id*="revseller" i], [class*="revseller" i], [data-testid*="revseller" i], [aria-label*="revseller" i], iframe[src*="revseller" i], [id*="rs-" i], [class*="rs-" i]';
-  const labels = ['sell price', 'selling price', 'fba fee', 'estimated profit', 'net profit', 'roi', 'bsr', 'sales rank', 'hazmat', 'meltable', 'ip alert', 'restriction'];
   const shadowHosts = [...document.querySelectorAll('*')].filter((node) => node.shadowRoot);
   const iframes = [...document.querySelectorAll('iframe')].map((iframe) => ({
     src: iframe.src || iframe.getAttribute('src') || null,
@@ -260,25 +303,22 @@ function revsellerPanelBrowserReader() {
     })()
   }));
   const candidates = [...document.querySelectorAll(selector)];
-  for (const host of shadowHosts) {
-    candidates.push(...host.shadowRoot.querySelectorAll(selector));
-  }
-  for (const node of [...document.querySelectorAll('aside, section, div, table')]) {
-    const text = clean(node.innerText || node.textContent) || '';
-    const hits = labels.filter((label) => text.toLowerCase().includes(label)).length;
-    if (hits >= 3 && text.length < 12000) candidates.push(node);
-  }
+  for (const host of shadowHosts) candidates.push(...host.shadowRoot.querySelectorAll(selector));
+  const isExtensionRenderContext = /^chrome-extension:\/\//i.test(location.href) || /revseller/i.test(location.href);
+  if (isExtensionRenderContext && document.body) candidates.push(document.body);
   const unique = [...new Set(candidates)].filter((node) => node?.isConnected);
   const scored = unique.map((node, index) => {
     const textNodes = visibleTextNodes(node);
     const text = clean(textNodes.join(' ') || node.innerText || node.textContent || node.getAttribute('src')) || '';
-    const score = labels.filter((label) => text.toLowerCase().includes(label)).length + (/revseller/i.test(`${node.id} ${node.className} ${node.getAttribute?.('src') || ''}`) ? 10 : 0);
-    return { node, text, textNodes, score, index, hasShadowRoot: Boolean(node.shadowRoot), isIframe: node.tagName === 'IFRAME' };
-  }).filter((entry) => entry.text).sort((a, b) => b.score - a.score || a.text.length - b.text.length || a.index - b.index);
+    const selectorHits = matchedSelectors(node);
+    const source = `${node.id || ''} ${String(node.className || '')} ${node.getAttribute?.('src') || ''} ${location.href}`;
+    const score = selectorHits.length * 20 + (/revseller/i.test(source) ? 50 : 0) + (/^chrome-extension:\/\//i.test(node.getAttribute?.('src') || location.href) ? 25 : 0) - Math.min(text.length / 1000, 10);
+    return { node, text, textNodes, score, index, selectorHits, domPath: cssPath(node), hasShadowRoot: Boolean(node.shadowRoot), isIframe: node.tagName === 'IFRAME' };
+  }).sort((a, b) => b.score - a.score || a.text.length - b.text.length || a.index - b.index);
   const panel = scored[0] || null;
   const panelNode = panel?.node || null;
-  const panelText = clean(scored.map((entry) => entry.text).join(' '));
-  const panelTextNodes = [...new Set(scored.flatMap((entry) => entry.textNodes))];
+  const panelText = panel?.text || '';
+  const panelTextNodes = panel?.textNodes || [];
   const panelHtml = panelNode?.outerHTML || null;
 
   const fieldPatterns = {
@@ -310,23 +350,29 @@ function revsellerPanelBrowserReader() {
     const value = match ? readNearbyValue(match, fieldName) : null;
     if (value) fields[fieldName] = value;
   }
+  const rootCandidates = scored.slice(0, 50).map(({ text, textNodes, score, hasShadowRoot, isIframe, node, domPath, selectorHits }) => ({
+    score, isIframe, hasShadowRoot, domPath, matchedSelectors: selectorHits, tagName: node.tagName, id: node.id || null, className: String(node.className || '') || null,
+    html: node.outerHTML || null,
+    text: text.slice(0, 5000),
+    textNodes: textNodes.slice(0, 200)
+  }));
   return {
     asin, productTitle, productUrl: location.href, panelText, panelTextNodes, panelHtml, fields,
-    panelFound: Boolean(panelNode || panelText),
+    rootDomPath: panel?.domPath || null,
+    rootScore: panel?.score ?? 0,
+    rootMatchedSelectors: panel?.selectorHits || [],
+    rootCandidates,
+    panelFound: Boolean(panelNode),
     diagnostics: {
       frameUrl: location.href,
       frameTitle: document.title || null,
       isTopFrame: window.top === window,
-      revsellerPanelPresent: Boolean(panelNode || scored.length),
+      revsellerPanelPresent: Boolean(panelNode),
       iframeCount: iframes.length,
       iframes,
       shadowRootCount: shadowHosts.length,
       shadowHosts: shadowHosts.slice(0, 100).map((node) => ({ tagName: node.tagName, id: node.id || null, className: String(node.className || '') || null })),
-      visibleTextCandidates: scored.slice(0, 50).map(({ text, textNodes, score, hasShadowRoot, isIframe, node }) => ({
-        score, isIframe, hasShadowRoot, tagName: node.tagName, id: node.id || null, className: String(node.className || '') || null,
-        text: text.slice(0, 5000),
-        textNodes: textNodes.slice(0, 200)
-      }))
+      visibleTextCandidates: rootCandidates.map(({ html, ...candidate }) => candidate)
     },
     renderContexts: scored.map(({ isIframe, hasShadowRoot, score }) => ({ isIframe, hasShadowRoot, score }))
   };
@@ -350,7 +396,7 @@ export async function readRevsellerPanel(page) {
     }));
     return { ...panel, frame: metadata, diagnostics: { ...panel.diagnostics, ...metadata } };
   }));
-  const best = framePanels.filter(Boolean).sort((a, b) => Number(Boolean(b.panelText)) - Number(Boolean(a.panelText)) || (b.panelText?.length || 0) - (a.panelText?.length || 0))[0] ?? { panelText: '', panelTextNodes: [], fields: {}, panelFound: false };
+  const best = framePanels.filter(Boolean).sort((a, b) => Number(Boolean(b.panelFound)) - Number(Boolean(a.panelFound)) || (b.rootScore ?? 0) - (a.rootScore ?? 0) || Number(Boolean(b.panelText)) - Number(Boolean(a.panelText)) || (a.panelText?.length || 0) - (b.panelText?.length || 0))[0] ?? { panelText: '', panelTextNodes: [], fields: {}, panelFound: false };
   return { ...best, frameDebug: framePanels };
 }
 
@@ -359,10 +405,19 @@ export const revsellerPanelSelectors = [
   '[id*="revseller" i]',
   '[class*="revseller" i]',
   '[data-testid*="revseller" i]',
+  '[data-test*="revseller" i]',
+  '[data-extension*="revseller" i]',
+  '[data-extension-id*="revseller" i]',
+  '[data-chrome-extension*="revseller" i]',
   '[aria-label*="revseller" i]',
   'iframe[src*="revseller" i]',
-  '[id*="rs-" i]',
-  '[class*="rs-" i]'
+  'iframe[src^="chrome-extension://"]',
+  '[id^="rs-"]',
+  '[class^="rs-"]',
+  '[class*=" rs-"]',
+  '[data-rs]',
+  '[data-rs-root]',
+  '[data-revseller]'
 ];
 
 export function isAmazonProductPageUrl(url) {
@@ -384,7 +439,7 @@ export async function detectRevsellerPanel(page, { timeoutMs = 15_000 } = {}) {
   const visible = await locator.isVisible({ timeout: timeoutMs }).catch(() => false);
   if (visible) return { visible: true, selector };
   const panel = await readRevsellerPanel(page);
-  return { visible: Boolean(panel.panelText), selector, panelTextFound: Boolean(panel.panelText) };
+  return { visible: Boolean(panel.panelFound), selector, panelTextFound: Boolean(panel.panelText), rootDomPath: panel.rootDomPath ?? null };
 }
 
 export async function saveRevsellerPanelTextArtifact(panel, { panelTextPath = revsellerPanelTextPath } = {}) {
@@ -399,7 +454,7 @@ export async function collectRevsellerLiveDiagnostics(page, panel = {}) {
   const serviceWorkerUrls = context?.serviceWorkers?.().map((worker) => worker.url()) ?? [];
   const detectedExtensionUrls = serviceWorkerUrls.filter((url) => url.startsWith('chrome-extension://'));
   const visibleTextCandidates = frameDebug.flatMap((entry) => entry.diagnostics?.visibleTextCandidates ?? []);
-  const revsellerPanelPresent = frameDebug.some((entry) => entry.diagnostics?.revsellerPanelPresent || /revseller/i.test(entry.panelText || ''));
+  const revsellerPanelPresent = frameDebug.some((entry) => entry.diagnostics?.revsellerPanelPresent || entry.panelFound);
   return {
     generatedAt: new Date().toISOString(),
     pageUrl: page.url(),
@@ -432,6 +487,18 @@ export async function saveRevsellerFrameDebugArtifact(page, panel, { debugPath =
   return { debugPath, diagnostics };
 }
 
+export async function saveRevsellerRootArtifacts(panel, { htmlPath = revsellerRootHtmlPath, textPath = revsellerRootTextPath, candidatesPath = revsellerRootCandidatesPath } = {}) {
+  await mkdir(path.dirname(htmlPath), { recursive: true });
+  await writeFile(htmlPath, panel?.panelHtml || '<!-- RevSeller root HTML was not available because no extension-specific root was found. -->');
+  await writeFile(textPath, rawPanelTextFromPanel(panel));
+  await writeFile(candidatesPath, JSON.stringify({
+    selectedDomPath: panel?.rootDomPath ?? null,
+    selectedMatchedSelectors: panel?.rootMatchedSelectors ?? [],
+    candidates: panel?.rootCandidates ?? []
+  }, null, 2));
+  return { rootHtmlPath: htmlPath, rootTextPath: textPath, rootCandidatesPath: candidatesPath };
+}
+
 export async function saveRevsellerNotVisibleArtifacts(page, { screenshotPath = revsellerMissingScreenshotPath, htmlPath = revsellerMissingHtmlPath, panelTextPath } = {}) {
   await mkdir(path.dirname(screenshotPath), { recursive: true });
   await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -439,7 +506,8 @@ export async function saveRevsellerNotVisibleArtifacts(page, { screenshotPath = 
   const panel = await readRevsellerPanel(page);
   const debug = await saveRevsellerFrameDebugArtifact(page, panel);
   const savedPanelTextPath = await saveRevsellerPanelTextArtifact(panel, { panelTextPath: panelTextPath ?? path.join(path.dirname(htmlPath), 'revseller-panel-text.txt') });
-  return { screenshotPath, htmlPath, panelTextPath: savedPanelTextPath, frameDebugPath: debug.debugPath, diagnostics: debug.diagnostics, panelEmpty: !Boolean(panel.panelText), renderContexts: panel.renderContexts ?? [] };
+  const rootArtifacts = await saveRevsellerRootArtifacts(panel);
+  return { screenshotPath, htmlPath, panelTextPath: savedPanelTextPath, ...rootArtifacts, frameDebugPath: debug.debugPath, diagnostics: debug.diagnostics, panelEmpty: !Boolean(panel.panelText), renderContexts: panel.renderContexts ?? [] };
 }
 
 
@@ -452,7 +520,8 @@ export async function saveRevsellerPanelArtifacts(page, panel, { screenshotPath 
     return false;
   });
   await writeFile(htmlPath, panel?.panelHtml || '<!-- RevSeller panel HTML was not available. -->');
-  return { screenshotPath, htmlPath, panelOnly: Boolean(panel?.panelHtml), screenshotPanelOnly: screenshotSaved };
+  const rootArtifacts = await saveRevsellerRootArtifacts(panel, { htmlPath, textPath: path.join(path.dirname(htmlPath), 'revseller-root-text.txt'), candidatesPath: path.join(path.dirname(htmlPath), 'revseller-root-candidates.json') });
+  return { screenshotPath, htmlPath, ...rootArtifacts, panelOnly: Boolean(panel?.panelHtml), screenshotPanelOnly: screenshotSaved };
 }
 
 export async function readRevsellerFromOpenAmazonPage(context, { reportPath = revsellerReaderReportPath } = {}) {
@@ -476,13 +545,14 @@ export async function readRevsellerFromOpenAmazonPage(context, { reportPath = re
   const panel = await readRevsellerPanel(page);
   const debug = await saveRevsellerFrameDebugArtifact(page, panel);
   const panelTextPath = await saveRevsellerPanelTextArtifact(panel);
+  const rootArtifacts = await saveRevsellerRootArtifacts(panel);
   if (!panel.panelText) {
     const report = {
       status: 'error',
       error: 'RevSeller panel text was not found in the live Amazon page.',
       pageUrl: url,
       revsellerPanelVisible: detection.visible,
-      artifacts: { panelTextPath, frameDebugPath: debug.debugPath, diagnostics: debug.diagnostics },
+      artifacts: { panelTextPath, ...rootArtifacts, frameDebugPath: debug.debugPath, diagnostics: debug.diagnostics },
       completedAt: new Date().toISOString()
     };
     await writeRevsellerAnalysisReport(reportPath, report);
@@ -490,7 +560,7 @@ export async function readRevsellerFromOpenAmazonPage(context, { reportPath = re
   }
   const data = extractRevsellerFields({ ...panel, panelFound: true });
   const artifacts = revsellerFieldsFound(data) ? undefined : await saveRevsellerPanelArtifacts(page, panel);
-  const report = { status: 'success', source: 'RevSeller', pageUrl: url, revsellerPanelVisible: data.revsellerPanelFound, data, artifacts: { ...(artifacts ?? {}), panelTextPath, frameDebugPath: debug.debugPath }, ...(artifacts ? { warning: 'RevSeller panel was visible, but expected fields were not found in the panel.' } : {}), completedAt: new Date().toISOString() };
+  const report = { status: 'success', source: 'RevSeller', pageUrl: url, revsellerPanelVisible: data.revsellerPanelFound, data, artifacts: { ...(artifacts ?? {}), panelTextPath, ...rootArtifacts, frameDebugPath: debug.debugPath }, ...(artifacts ? { warning: 'RevSeller panel was visible, but expected fields were not found in the panel.' } : {}), completedAt: new Date().toISOString() };
   await writeRevsellerAnalysisReport(reportPath, report);
   return report;
 }
