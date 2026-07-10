@@ -226,7 +226,7 @@ test('runAmazonAnalysis saves screenshot, HTML, and structured RevSeller error w
     assert.equal(written.revseller.artifacts.screenshotPath, screenshotPath);
     assert.equal(await readFile(htmlPath, 'utf8'), productHtml);
     assert.equal(written.revseller.artifacts.panelTextPath, panelTextPath);
-    assert.equal(await readFile(panelTextPath, 'utf8'), '\n');
+    assert.equal(await readFile(panelTextPath, 'utf8'), '');
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

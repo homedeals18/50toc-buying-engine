@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
-import { amazonMatchQuery, extractAmazonProductFromPage, extractRevsellerFields, isAmazonProductPageUrl, readRevsellerPanel } from './revseller-integration.mjs';
+import { amazonMatchQuery, extractAmazonProductFromPage, extractRevsellerFields, isAmazonProductPageUrl, readRevsellerPanel, saveRevsellerPanelTextArtifact } from './revseller-integration.mjs';
 
 test('extracts RevSeller panel fields without calculating profitability', () => {
   const result = extractRevsellerFields({
@@ -52,6 +55,66 @@ test('prefers structured RevSeller DOM fields and keeps panel visibility consist
   assert.equal(result.hazmatWarning, 'No hazmat warning');
   assert.equal(result.meltableWarning, 'Meltable');
   assert.equal(result.ipRestrictionWarnings, 'Restriction warning shown');
+});
+
+test('parses captured 208-character live RevSeller panel text fixture', async () => {
+  const fixturePath = path.join(import.meta.dirname, 'fixtures', 'live-panel-208.txt');
+  const panelText = await readFile(fixturePath, 'utf8');
+  assert.equal(panelText.length, 208);
+
+  const result = extractRevsellerFields({
+    panelText,
+    productUrl: 'https://www.amazon.com/dp/B000TEST01',
+    panelFound: true
+  });
+
+  assert.equal(result.revsellerPanelFound, true);
+  assert.equal(result.asin, 'B000TEST01');
+  assert.equal(result.sellingPrice, '$24.99');
+  assert.equal(result.currentAmazonPrice, 24.99);
+  assert.equal(result.fbaFees, '$5.67');
+  assert.equal(result.estimatedProfit, '$7.89');
+  assert.equal(result.roi, '45%');
+  assert.equal(result.bsr, '12,345');
+  assert.equal(result.category, 'Grocery & Gourmet Food');
+  assert.equal(result.hazmatWarning, 'No');
+  assert.equal(result.meltableWarning, 'No');
+  assert.equal(result.ipRestrictionWarnings, 'None');
+});
+
+test('extracts fields from main-frame visible text candidates when panelText is not populated', () => {
+  const result = extractRevsellerFields({
+    panelText: '',
+    panelFound: true,
+    diagnostics: {
+      visibleTextCandidates: [{
+        text: 'Sell Price $18.49 FBA Fees $4.11 Estimated Profit $3.22 ROI 21% BSR 8,901 Category Health Hazmat No',
+        textNodes: []
+      }]
+    }
+  });
+
+  assert.equal(result.sellingPrice, '$18.49');
+  assert.equal(result.fbaFees, '$4.11');
+  assert.equal(result.estimatedProfit, '$3.22');
+  assert.equal(result.roi, '21%');
+  assert.equal(result.bsr, '8,901');
+  assert.equal(result.category, 'Health');
+  assert.equal(result.meltableWarning, null);
+  assert.equal(result.ipRestrictionWarnings, null);
+});
+
+test('saves raw live panel text exactly without joining text nodes', async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'revseller-panel-text-'));
+  const panelTextPath = path.join(tempRoot, 'revseller-panel-text.txt');
+  const rawPanelText = 'Sell Price $18.49\nFBA Fees $4.11\nROI 21%';
+
+  await saveRevsellerPanelTextArtifact({
+    panelText: rawPanelText,
+    panelTextNodes: ['Sell Price', '$18.49', 'FBA Fees', '$4.11', 'ROI', '21%']
+  }, { panelTextPath });
+
+  assert.equal(await readFile(panelTextPath, 'utf8'), rawPanelText);
 });
 
 test('builds reusable Amazon match query from connector product fields', () => {
