@@ -23,6 +23,7 @@ Set these environment variables before running Amazon or RevSeller automation:
 Optional:
 
 - `AMAZON_BROWSER_HEADLESS=true`: run headless. For extension-backed RevSeller analysis, headed Chrome is recommended because Chrome extensions may not behave consistently in headless mode.
+- `AMAZON_CHROME_CDP_ENDPOINT`: optional endpoint for an already-running Chrome session, defaulting to `http://127.0.0.1:9222`.
 
 ## Windows setup
 
@@ -34,12 +35,13 @@ Optional:
      - parent `User Data` folder -> `AMAZON_CHROME_USER_DATA_DIR`
      - final profile folder name (`Default`, `Profile 1`, etc.) -> `AMAZON_CHROME_PROFILE_DIRECTORY`
 4. Confirm that RevSeller is installed and logged in in that exact Chrome profile.
+5. If that Default profile is already open, start that same Chrome session with `--remote-debugging-port=9222` before running automation, or close Chrome. The manager connects to an existing debuggable session or fails clearly; it never creates a temporary profile or a second conflicting instance.
 
 PowerShell example:
 
 ```powershell
 $env:AMAZON_CHROME_PATH = "C:\Program Files\Google\Chrome\Application\chrome.exe"
-$env:AMAZON_CHROME_USER_DATA_DIR = "$env:LOCALAPPDATA\Google\Chrome\User Data"
+$env:AMAZON_CHROME_USER_DATA_DIR = "C:\Users\Nir\AppData\Local\Google\Chrome\User Data"
 $env:AMAZON_CHROME_PROFILE_DIRECTORY = "Default"
 npm run read:revseller
 ```

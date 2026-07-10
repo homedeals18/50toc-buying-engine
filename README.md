@@ -174,12 +174,12 @@ Windows PowerShell setup:
 
 ```powershell
 $env:AMAZON_CHROME_PATH = "C:\Program Files\Google\Chrome\Application\chrome.exe"
-$env:AMAZON_CHROME_USER_DATA_DIR = "$env:LOCALAPPDATA\Google\Chrome\User Data"
+$env:AMAZON_CHROME_USER_DATA_DIR = "C:\Users\Nir\AppData\Local\Google\Chrome\User Data"
 $env:AMAZON_CHROME_PROFILE_DIRECTORY = "Default"
 npm run read:revseller
 ```
 
-To find the correct Windows values, open `chrome://version` in the exact Chrome profile that has RevSeller installed. Use **Executable Path** for `AMAZON_CHROME_PATH`. Split **Profile Path** so the parent `User Data` folder becomes `AMAZON_CHROME_USER_DATA_DIR` and the final folder name, such as `Default` or `Profile 1`, becomes `AMAZON_CHROME_PROFILE_DIRECTORY`. Close other Chrome windows for that profile before running automation so Chrome can open the configured persistent profile.
+To find the correct Windows values, open `chrome://version` in the exact Chrome profile that has RevSeller installed. Use **Executable Path** for `AMAZON_CHROME_PATH`. Split **Profile Path** so the parent `User Data` folder becomes `AMAZON_CHROME_USER_DATA_DIR` and the final folder name, such as `Default` or `Profile 1`, becomes `AMAZON_CHROME_PROFILE_DIRECTORY`. If that Default profile is already open, start the existing Chrome session with `--remote-debugging-port=9222` and set `AMAZON_CHROME_CDP_ENDPOINT` if you use a non-default endpoint; otherwise close Chrome before running automation. The session manager connects to the existing debuggable Chrome session or fails clearly, and never creates a second conflicting instance or temporary profile.
 
 Run the RevSeller authenticated Amazon analysis from the repository root:
 

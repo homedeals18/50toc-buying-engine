@@ -7,24 +7,32 @@ export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.met
 export const amazonHomeUrl = 'https://www.amazon.com/';
 export const revsellerHomeUrl = 'https://www.revseller.com/';
 export const revsellerUnavailableMessage = 'RevSeller extension is not available in the configured Chrome profile.';
+export const chromeProfileInUseMessage = 'Configured Chrome profile is already in use. Start that existing Chrome session with --remote-debugging-port=9222 and set AMAZON_CHROME_CDP_ENDPOINT, or close Chrome before running Amazon analysis. The automation will not create a second conflicting Chrome instance or a temporary profile.';
+export const defaultAmazonChromeCdpEndpoint = 'http://127.0.0.1:9222';
+
+const defaultWindowsChromeConfig = {
+  chromePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  userDataDir: 'C:\\Users\\Nir\\AppData\\Local\\Google\\Chrome\\User Data',
+  profileDirectory: 'Default'
+};
 
 let sharedContextPromise = null;
 
-export function resolveChromePath(chromePath = process.env.AMAZON_CHROME_PATH) {
+export function resolveChromePath(chromePath = process.env.AMAZON_CHROME_PATH ?? (process.platform === 'win32' ? defaultWindowsChromeConfig.chromePath : undefined)) {
   if (!chromePath) throw new Error('AMAZON_CHROME_PATH must point to regular Google Chrome.');
   const resolvedChromePath = path.resolve(chromePath);
   if (!existsSync(resolvedChromePath)) throw new Error(`AMAZON_CHROME_PATH does not exist: ${resolvedChromePath}`);
   return resolvedChromePath;
 }
 
-export function resolveUserDataDir(userDataDir = process.env.AMAZON_CHROME_USER_DATA_DIR) {
+export function resolveUserDataDir(userDataDir = process.env.AMAZON_CHROME_USER_DATA_DIR ?? (process.platform === 'win32' ? defaultWindowsChromeConfig.userDataDir : undefined)) {
   if (!userDataDir) throw new Error('AMAZON_CHROME_USER_DATA_DIR must point to the existing Chrome User Data directory that contains the RevSeller profile.');
   const resolvedUserDataDir = path.resolve(userDataDir);
   if (!existsSync(resolvedUserDataDir)) throw new Error(`AMAZON_CHROME_USER_DATA_DIR does not exist: ${resolvedUserDataDir}`);
   return resolvedUserDataDir;
 }
 
-export function resolveProfileDirectory(profileDirectory = process.env.AMAZON_CHROME_PROFILE_DIRECTORY) {
+export function resolveProfileDirectory(profileDirectory = process.env.AMAZON_CHROME_PROFILE_DIRECTORY ?? (process.platform === 'win32' ? defaultWindowsChromeConfig.profileDirectory : undefined)) {
   if (!profileDirectory) throw new Error('AMAZON_CHROME_PROFILE_DIRECTORY must name the existing Chrome profile directory, for example Default or Profile 1.');
   if (path.isAbsolute(profileDirectory) || profileDirectory.includes('/') || profileDirectory.includes('\\')) {
     throw new Error('AMAZON_CHROME_PROFILE_DIRECTORY must be a Chrome profile directory name such as Default or Profile 1, not a full path.');
@@ -50,8 +58,8 @@ function profileDirectoryArg(profileDirectory) {
 }
 
 export function buildLaunchOptions({
-  chromePath = process.env.AMAZON_CHROME_PATH,
-  profileDirectory = process.env.AMAZON_CHROME_PROFILE_DIRECTORY,
+  chromePath = process.env.AMAZON_CHROME_PATH ?? (process.platform === 'win32' ? defaultWindowsChromeConfig.chromePath : undefined),
+  profileDirectory = process.env.AMAZON_CHROME_PROFILE_DIRECTORY ?? (process.platform === 'win32' ? defaultWindowsChromeConfig.profileDirectory : undefined),
   headless = process.env.AMAZON_BROWSER_HEADLESS === 'true',
   viewport = { width: 1440, height: 1000 },
   args = []
@@ -63,6 +71,41 @@ export function buildLaunchOptions({
     viewport,
     args: [...new Set(['--disable-dev-shm-usage', '--no-sandbox', profileDirectoryArg(resolvedProfileDirectory), ...args])]
   };
+}
+
+
+function chromeProfileLockPaths(userDataDir) {
+  return ['SingletonLock', 'SingletonCookie', 'SingletonSocket'].map((name) => path.join(userDataDir, name));
+}
+
+export function isChromeProfileInUse(userDataDir) {
+  return chromeProfileLockPaths(userDataDir).some((lockPath) => existsSync(lockPath));
+}
+
+async function connectToExistingChromeSession({ chromiumLauncher, cdpEndpoint = process.env.AMAZON_CHROME_CDP_ENDPOINT ?? defaultAmazonChromeCdpEndpoint, config, revsellerExtension }) {
+  try {
+    const browser = await chromiumLauncher.connectOverCDP(cdpEndpoint);
+    const context = browser.contexts()[0];
+    if (!context) {
+      await browser.close().catch(() => {});
+      throw new Error('Connected Chrome session has no browser contexts.');
+    }
+    context.amazonBrowserSession = {
+      chromePath: config.chromePath,
+      userDataDir: config.userDataDir,
+      profileDirectory: config.profileDirectory,
+      profilePath: config.profilePath,
+      revsellerExtension,
+      persistent: true,
+      autoLogin: false,
+      connectedOverCDP: true,
+      cdpEndpoint,
+      sharedFor: ['amazon-product-discovery', 'amazon-matching', 'revseller']
+    };
+    return context;
+  } catch (error) {
+    throw new Error(`${chromeProfileInUseMessage} Failed to connect to ${cdpEndpoint}: ${error.message}`);
+  }
 }
 
 async function loadChromium(chromium) {
@@ -111,7 +154,18 @@ export async function launchAmazonBrowserSession({ chromium, chromePath, userDat
   const config = resolveChromeProfileConfig({ chromePath, userDataDir, profileDirectory });
   const revsellerExtension = await verifyRevsellerExtensionAvailable(config.profilePath);
   const chromiumLauncher = await loadChromium(chromium);
-  const context = await chromiumLauncher.launchPersistentContext(config.userDataDir, buildLaunchOptions({ chromePath: config.chromePath, profileDirectory: config.profileDirectory, ...launchOptions }));
+  if (isChromeProfileInUse(config.userDataDir)) {
+    return connectToExistingChromeSession({ chromiumLauncher, config, revsellerExtension });
+  }
+  let context;
+  try {
+    context = await chromiumLauncher.launchPersistentContext(config.userDataDir, buildLaunchOptions({ chromePath: config.chromePath, profileDirectory: config.profileDirectory, ...launchOptions }));
+  } catch (error) {
+    if (/profile|user data|process|singleton|lock/i.test(error.message)) {
+      throw new Error(`${chromeProfileInUseMessage} Original launch error: ${error.message}`);
+    }
+    throw error;
+  }
   context.amazonBrowserSession = {
     chromePath: config.chromePath,
     userDataDir: config.userDataDir,
