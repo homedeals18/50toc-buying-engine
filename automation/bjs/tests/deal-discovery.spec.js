@@ -91,12 +91,20 @@ async function saveStep(page, name, details = {}) {
   await ensureArtifactDirs();
   const safeName = name.replace(/[^a-z0-9-]+/gi, '-').toLowerCase();
   const screenshotPath = path.join(screenshotDir, `${safeName}.png`);
-  await page.screenshot({ path: screenshotPath, fullPage: true });
+  let savedScreenshotPath = screenshotPath;
+  let screenshotError = null;
+  try {
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+  } catch (error) {
+    savedScreenshotPath = null;
+    screenshotError = error.message;
+    console.warn(`BJ's screenshot capture failed for ${name}: ${error.message}`);
+  }
   await writeFile(
     path.join(logDir, `${safeName}.json`),
-    JSON.stringify({ ...details, url: page.url(), title: await page.title().catch(() => ''), savedAt: new Date().toISOString(), screenshotPath }, null, 2)
+    JSON.stringify({ ...details, url: page.url(), title: await page.title().catch(() => ''), savedAt: new Date().toISOString(), screenshotPath: savedScreenshotPath, screenshotError }, null, 2)
   );
-  return screenshotPath;
+  return savedScreenshotPath;
 }
 
 async function clickCookieOrModalDismissers(page) {
@@ -444,6 +452,8 @@ async function enrichProductFromPage(page, listingProduct, index) {
 
 
 test.describe("BJ's store shopping list intelligence", () => {
+  test.setTimeout(Number(process.env.BJS_DEALS_TEST_TIMEOUT_MS ?? 0));
+
   test('scrapes Clearance and Wow Deals data only, without cart or checkout actions', async ({ page }) => {
     const consoleMessages = [];
     page.on('console', (message) => consoleMessages.push({ type: message.type(), text: message.text() }));
@@ -452,6 +462,7 @@ test.describe("BJ's store shopping list intelligence", () => {
     const auth = await ensureAuthenticated(page);
     const sourceReports = [];
     const products = [];
+    const runCounts = { attempted: 0, accepted: 0, rejected: 0, failed: 0 };
 
     for (const dealSource of dealSources) {
       const discoveredUrl = await navigateToDealSource(page, dealSource);
@@ -471,23 +482,44 @@ test.describe("BJ's store shopping list intelligence", () => {
       }
 
       const sourceProducts = [];
-      const limitedListingProducts = listingProducts.slice(0, dealSource.maxProducts);
-      for (const [index, product] of limitedListingProducts.entries()) {
-        const enrichedProduct = await enrichProductFromPage(page, product, index);
-        if (categoryAllowed(enrichedProduct)) {
-          sourceProducts.push(enrichedProduct);
-          products.push(enrichedProduct);
-          await saveProgress(products);
-        } else {
-          console.log(`BJ's ${dealSource.name}: skipped unrelated category "${enrichedProduct.category}" for ${enrichedProduct.productName ?? enrichedProduct.productUrl}.`);
+      const counts = { attempted: 0, accepted: 0, rejected: 0, failed: 0 };
+      const failures = [];
+      for (const [index, product] of listingProducts.entries()) {
+        if (sourceProducts.length >= dealSource.maxProducts) break;
+        counts.attempted += 1;
+        try {
+          const enrichedProduct = await enrichProductFromPage(page, product, index);
+          if (categoryAllowed(enrichedProduct)) {
+            sourceProducts.push(enrichedProduct);
+            products.push(enrichedProduct);
+            counts.accepted += 1;
+            await saveProgress(products);
+          } else {
+            counts.rejected += 1;
+            console.log(`BJ's ${dealSource.name}: skipped unrelated category "${enrichedProduct.category}" for ${enrichedProduct.productName ?? enrichedProduct.productUrl}.`);
+          }
+        } catch (error) {
+          counts.failed += 1;
+          failures.push({ productUrl: product.productUrl, productName: product.productName, error: error.message });
+          console.warn(`BJ's ${dealSource.name}: failed to scrape ${product.productName ?? product.productUrl}: ${error.message}`);
         }
       }
+      runCounts.attempted += counts.attempted;
+      runCounts.accepted += counts.accepted;
+      runCounts.rejected += counts.rejected;
+      runCounts.failed += counts.failed;
+
       sourceReports.push({
         dealSource: dealSource.name,
         discoveredUrl,
         productCount: sourceProducts.length,
         scrapedProductLimit: dealSource.maxProducts,
-        skippedByLimitCount: Math.max(listingProducts.length - dealSource.maxProducts, 0),
+        skippedByLimitCount: Math.max(listingProducts.length - counts.attempted, 0),
+        attemptedCount: counts.attempted,
+        acceptedCount: counts.accepted,
+        rejectedCount: counts.rejected,
+        failedCount: counts.failed,
+        failures,
         listingScreenshots
       });
     }
@@ -497,6 +529,10 @@ test.describe("BJ's store shopping list intelligence", () => {
       auth,
       sourceReports,
       productCount: products.length,
+      attemptedCount: runCounts.attempted,
+      acceptedCount: runCounts.accepted,
+      rejectedCount: runCounts.rejected,
+      failedCount: runCounts.failed,
       productLimits: Object.fromEntries(dealSources.map((source) => [source.name, source.maxProducts])),
       outputs: {
         dealProducts: dealProductsPath,
