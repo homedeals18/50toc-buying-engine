@@ -12,14 +12,20 @@ const costco = { id: 'costco_business_center', name: 'Costco Business Center' };
 test('mergeProducts deduplicates by UPC and keeps all offers while marking the lowest purchase price', () => {
   const [product] = mergeProducts([
     { connector: bjs, product: { supplier: bjs.name, upc: '12345', brand: 'Acme', productName: 'Protein Bar', packageSize: '24 ct', currentPrice: '$19.99' } },
-    { connector: costco, product: { supplier: costco.name, upc: '12345', brand: 'Acme', productName: 'Protein Bar', packageSize: '24 ct', currentPrice: '$17.49' } }
+    { connector: costco, product: { supplier: costco.name, upc: '12345', brand: 'Acme', productName: 'Protein Bar', packageSize: '24 ct', currentPrice: '$23.49', originalPrice: '$23.49', couponDiscount: '$6.00', finalPurchasePrice: '$17.49' } }
   ]);
 
   assert.equal(product.offerCount, 2);
   assert.equal(product.storeCount, 2);
   assert.equal(product.lowestPurchasePriceDisplay, '$17.49');
   assert.deepEqual(product.lowestPurchaseStores, ['Costco Business Center']);
-  assert.equal(product.offers.find((offer) => offer.storeId === 'costco_business_center').isLowestPurchasePrice, true);
+  const costcoOffer = product.offers.find((offer) => offer.storeId === 'costco_business_center');
+  assert.equal(costcoOffer.isLowestPurchasePrice, true);
+  assert.equal(costcoOffer.purchasePrice, 17.49);
+  assert.equal(costcoOffer.purchasePriceDisplay, '$17.49');
+  assert.equal(costcoOffer.originalPrice, '$23.49');
+  assert.equal(costcoOffer.couponDiscount, '$6.00');
+  assert.equal(costcoOffer.finalPurchasePrice, '$17.49');
 });
 
 test('mergeProducts falls back to brand, product name, and package size when UPC is missing', () => {

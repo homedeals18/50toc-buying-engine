@@ -80,12 +80,14 @@ function productIdentity(product) {
 }
 
 function toOffer(product, connector) {
-  const purchasePrice = moneyToNumber(product.currentPrice ?? product.price);
+  const purchasePrice = moneyToNumber(product.finalPurchasePrice ?? product.purchasePrice ?? product.currentPrice ?? product.price);
   return {
     storeId: connector.id,
     storeName: product.supplier ?? connector.name,
     purchasePrice,
-    purchasePriceDisplay: product.currentPrice ?? product.price ?? null,
+    purchasePriceDisplay: product.finalPurchasePrice ?? product.purchasePrice ?? product.currentPrice ?? product.price ?? null,
+    finalPurchasePrice: product.finalPurchasePrice ?? null,
+    couponDiscount: product.couponDiscount ?? null,
     originalPrice: product.originalPrice ?? null,
     discount: product.discount ?? null,
     coupon: product.coupon ?? null,

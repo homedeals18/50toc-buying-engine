@@ -194,7 +194,7 @@ function amazonProductUrl(asin, fallbackUrl = null) {
 }
 
 function purchasePrice(product) {
-  return formatMoney(product.currentPrice ?? product.price ?? product.purchasePrice ?? product.salePrice);
+  return formatMoney(product.finalPurchasePrice ?? product.purchasePrice ?? product.currentPrice ?? product.price ?? product.salePrice);
 }
 
 async function readConnectorProducts(connector) {
