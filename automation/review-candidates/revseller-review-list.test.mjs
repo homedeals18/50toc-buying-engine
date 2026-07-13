@@ -81,7 +81,7 @@ test('loadExistingAmazonResults reads reusable Amazon artifacts without searchin
   try {
     await writeFile(productDiscoveryPath, JSON.stringify({ discoveries: [{ sourceProduct: { id: 'p1', brand: 'Acme', productName: 'Bars', packageSize: '24 ct' }, matched: true, matchScore: 95, amazonProduct: { asin: 'B0FX3DY3C7', title: 'Acme Bars 24 ct', currentPrice: '$19.99' } }] }));
     await writeFile(matchingReportPath, JSON.stringify({ matches: [{ sourceProduct: { id: 'p2' }, matched: true, confidenceScore: 92, amazonAsin: 'BMATCH0001', amazonTitle: 'Matched Item' }] }));
-    await writeFile(amazonAnalysisPath, JSON.stringify({ storeProduct: { id: 'p3' }, amazonProduct: { asin: 'BANALYZE01', title: 'Analyzed Item' } }));
+    await writeFile(amazonAnalysisPath, JSON.stringify({ analyses: [{ storeProduct: { id: 'p3' }, matchScore: 91, amazonProduct: { asin: 'BANALYZE01', title: 'Analyzed Item' } }] }));
 
     const matches = await loadExistingAmazonResults({ productDiscoveryPath, matchingReportPath, amazonAnalysisPath });
 
@@ -105,7 +105,13 @@ test('buildReviewList integrates available BJ, Costco Business Center, and Sam\'
   const csvPath = path.join(tempRoot, 'artifacts', 'revseller-review-list.csv');
 
   try {
-    const report = await buildReviewList({ connectors, amazonCatalog, jsonPath, csvPath });
+    const report = await buildReviewList({
+      connectors,
+      amazonCatalog,
+      amazonArtifactPaths: { productDiscoveryPath: path.join(tempRoot, 'missing-product-discovery.json'), matchingReportPath: path.join(tempRoot, 'missing-matching-report.json'), amazonAnalysisPath: path.join(tempRoot, 'missing-amazon-analysis.json') },
+      jsonPath,
+      csvPath
+    });
     const written = JSON.parse(await readFile(jsonPath, 'utf8'));
     const csv = await readFile(csvPath, 'utf8');
     assert.equal(report.totals.inputProducts, 3);
@@ -114,6 +120,57 @@ test('buildReviewList integrates available BJ, Costco Business Center, and Sam\'
     assert.equal(written.totals.noAmazonMatch, 1);
     assert.match(csv, /^store,storeProductName,purchasePrice,amazonTitle,amazonSellingPrice,asin,amazonProductUrl,matchConfidence,matchReason,status/);
     assert.match(csv, /READY_FOR_REVSELLER_REVIEW/);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+
+test('buildReviewList creates direct review candidate from amazon-analysis storeProduct and amazonProduct', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'review-list-analysis-'));
+  const connectors = [
+    { id: 'bjs', name: "BJ's Wholesale Club", enabled: true, dealProductsPath: path.join(tempRoot, 'bjs.json') }
+  ];
+  const amazonAnalysisPath = path.join(tempRoot, 'amazon-analysis.json');
+  const jsonPath = path.join(tempRoot, 'artifacts', 'revseller-review-list.json');
+  const csvPath = path.join(tempRoot, 'artifacts', 'revseller-review-list.csv');
+
+  try {
+    await writeFile(connectors[0].dealProductsPath, JSON.stringify([]));
+    await writeFile(amazonAnalysisPath, JSON.stringify({
+      storeProduct: {
+        store: "BJ's Wholesale Club",
+        productName: '5-hour ENERGY Fruity Rainbow 24 ct',
+        purchasePrice: '$43.19'
+      },
+      amazonProduct: {
+        asin: 'B0FX3DY3C7',
+        title: '5-hour ENERGY Fruity Rainbow 24 ct',
+        currentPrice: '$52.99',
+        productUrl: 'https://www.amazon.com/dp/B0FX3DY3C7'
+      },
+      matchScore: 95
+    }));
+
+    const report = await buildReviewList({
+      connectors,
+      amazonCatalog: [],
+      amazonArtifactPaths: { productDiscoveryPath: path.join(tempRoot, 'missing-product-discovery.json'), matchingReportPath: path.join(tempRoot, 'missing-matching-report.json'), amazonAnalysisPath },
+      jsonPath,
+      csvPath
+    });
+
+    const candidate = report.candidates.find((entry) => entry.asin === 'B0FX3DY3C7');
+    assert.ok(candidate);
+    assert.equal(candidate.status, 'READY_FOR_REVSELLER_REVIEW');
+    assert.equal(candidate.store, "BJ's Wholesale Club");
+    assert.equal(candidate.storeProductName, '5-hour ENERGY Fruity Rainbow 24 ct');
+    assert.equal(candidate.purchasePrice, '$43.19');
+    assert.equal(candidate.amazonTitle, '5-hour ENERGY Fruity Rainbow 24 ct');
+    assert.equal(candidate.amazonSellingPrice, '$52.99');
+    assert.equal(candidate.amazonProductUrl, 'https://www.amazon.com/dp/B0FX3DY3C7');
+    assert.equal(candidate.matchConfidence, 95);
+    assert.equal(report.totals.readyForRevsellerReview, 1);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

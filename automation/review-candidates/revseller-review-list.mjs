@@ -101,17 +101,32 @@ function artifactMatchFromMatchingReport(entry) {
 }
 
 function artifactMatchFromAnalysis(report) {
-  if (!report?.amazonProduct?.asin) return null;
+  if (!report?.storeProduct || !report?.amazonProduct?.asin) return null;
   const amazonProduct = normalizeExistingAmazonProduct({ ...report.amazonProduct, currentSellingPrice: report.amazonProduct.currentSellingPrice ?? report.amazonProduct.currentPrice });
   return {
-    sourceProduct: report.storeProduct ?? report.sourceProduct ?? null,
+    sourceProduct: report.storeProduct,
     amazonProduct,
     asin: amazonProduct.asin,
-    confidenceScore: report.matchScore ?? 0,
-    matchReason: 'Existing Amazon Analysis match',
-    matched: true,
+    confidenceScore: report.matchScore ?? report.confidenceScore ?? 0,
+    matchReason: report.matchReason ?? 'Existing Amazon Analysis match',
+    matched: report.matched ?? true,
+    needsReview: report.needsReview,
     source: 'amazon-analysis'
   };
+}
+
+function collectAmazonAnalysisMatches(value, matches = []) {
+  if (!value || typeof value !== 'object') return matches;
+  const directMatch = artifactMatchFromAnalysis(value);
+  if (directMatch) matches.push(directMatch);
+  if (Array.isArray(value)) {
+    for (const entry of value) collectAmazonAnalysisMatches(entry, matches);
+    return matches;
+  }
+  for (const key of ['analyses', 'analysis', 'results', 'matches', 'reports', 'items']) {
+    if (value[key]) collectAmazonAnalysisMatches(value[key], matches);
+  }
+  return matches;
 }
 
 async function readJsonIfExists(filePath) {
@@ -132,8 +147,7 @@ export async function loadExistingAmazonResults({ productDiscoveryPath = default
     if (match) matches.push(match);
   }
   const analysis = await readJsonIfExists(amazonAnalysisPath);
-  const analysisMatch = artifactMatchFromAnalysis(analysis);
-  if (analysisMatch) matches.push(analysisMatch);
+  matches.push(...collectAmazonAnalysisMatches(analysis));
   return matches;
 }
 
@@ -225,6 +239,41 @@ export function toReviewCandidate(product, amazonCatalog = loadAmazonCatalogFrom
   };
 }
 
+
+export function toReviewCandidateFromExistingAmazonResult(existingResult) {
+  const product = existingResult.sourceProduct ?? {};
+  const asin = existingResult.asin ?? existingResult.amazonProduct?.asin ?? null;
+  const confidenceScore = existingResult.confidenceScore ?? 0;
+  const hasAmazonCandidate = Boolean(asin);
+  const status = existingResult.matched && confidenceScore >= 90
+    ? 'READY_FOR_REVSELLER_REVIEW'
+    : hasAmazonCandidate
+      ? 'NEEDS_MATCH_REVIEW'
+      : 'NO_AMAZON_MATCH';
+  return {
+    store: product.store ?? product.supplier ?? product.storeName ?? null,
+    storeProductName: product.productName ?? product.title ?? product.name ?? null,
+    purchasePrice: purchasePrice(product),
+    amazonTitle: existingResult.amazonProduct?.title ?? null,
+    amazonSellingPrice: existingResult.amazonProduct?.currentSellingPrice ?? null,
+    asin,
+    amazonProductUrl: amazonProductUrl(asin, existingResult.amazonProduct?.productUrl),
+    matchConfidence: confidenceScore,
+    matchReason: existingResult.matchReason ?? null,
+    status
+  };
+}
+
+function candidateKey(candidate) {
+  return [normalized(candidate.store), normalized(candidate.storeProductName), normalized(candidate.asin)].join('|');
+}
+
+function directAnalysisCandidates(existingAmazonResults) {
+  return existingAmazonResults
+    .filter((result) => result.source === 'amazon-analysis' && result.sourceProduct && result.amazonProduct)
+    .map((result) => toReviewCandidateFromExistingAmazonResult(result));
+}
+
 function csvEscape(value) {
   if (value === null || value === undefined) return '';
   const text = String(value);
@@ -240,6 +289,14 @@ export async function buildReviewList({ connectors = defaultConnectorRegistry, a
   const { products, sources } = await loadAvailableStoreProducts(connectors);
   const reusableAmazonResults = existingAmazonResults ?? await loadExistingAmazonResults(amazonArtifactPaths);
   const candidates = products.map((product) => toReviewCandidate(product, amazonCatalog, reusableAmazonResults));
+  const seenCandidateKeys = new Set(candidates.map(candidateKey));
+  for (const candidate of directAnalysisCandidates(reusableAmazonResults)) {
+    const key = candidateKey(candidate);
+    if (!seenCandidateKeys.has(key)) {
+      candidates.push(candidate);
+      seenCandidateKeys.add(key);
+    }
+  }
   const report = {
     engine: 'revseller-review-candidates-v1',
     generatedAt: new Date().toISOString(),
