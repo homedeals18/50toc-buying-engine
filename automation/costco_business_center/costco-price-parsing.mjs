@@ -22,6 +22,41 @@ export function costcoPriceParsingSource() {
       }
       return null;
     }
+
+    function costcoMoneyToNumber(value) {
+      const normalized = normalizeCostcoMoney(value);
+      if (!normalized) return null;
+      const numeric = Number(String(normalized).replace(/[^0-9.-]/g, ''));
+      return Number.isFinite(numeric) ? numeric : null;
+    }
+    function formatCostcoMoney(value) {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? '$' + numeric.toFixed(2) : null;
+    }
+    function extractCostcoCouponDiscount(text) {
+      const source = String(text || '').replace(/\u00a0/g, ' ');
+      const match = source.match(/(?:save|instant\s+savings)\s*\$?\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\s*\.\s*\d{2}|\s+\d{2})?)/i);
+      return match ? normalizeCostcoMoney('$' + match[1]) : null;
+    }
+    function extractCostcoOriginalPrice(text) {
+      const source = String(text || '').replace(/\u00a0/g, ' ');
+      const match = source.match(/\bwas\s*(\$\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\s*\.\s*\d{2}|\s+\d{2})?)/i)
+        || source.match(/\boriginal(?:\s+price)?\s*(\$\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\s*\.\s*\d{2}|\s+\d{2})?)/i);
+      return match ? normalizeCostcoMoney(match[1]) : null;
+    }
+    function calculateCostcoInstantSavingsPrice(text, displayedPrice = null) {
+      const originalPrice = extractCostcoOriginalPrice(text);
+      const couponDiscount = extractCostcoCouponDiscount(text);
+      const original = costcoMoneyToNumber(originalPrice);
+      const coupon = costcoMoneyToNumber(couponDiscount);
+      const displayed = costcoMoneyToNumber(displayedPrice);
+      if (original !== null && coupon !== null) {
+        const discounted = Math.max(0, Math.round((original - coupon) * 100) / 100);
+        const finalPurchasePrice = displayed !== null && Math.abs(displayed - discounted) < 0.01 ? displayed : discounted;
+        return { originalPrice, couponDiscount, finalPurchasePrice: formatCostcoMoney(finalPurchasePrice) };
+      }
+      return { originalPrice: originalPrice ?? null, couponDiscount: couponDiscount ?? null, finalPurchasePrice: displayed !== null ? formatCostcoMoney(displayed) : null };
+    }
     function extractCostcoPrices(text) {
       const source = String(text || '').replace(/\u00a0/g, ' ');
       const pricePattern = /\$\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\s*\.\s*\d{2}|\s+\d{2})?\b/g;

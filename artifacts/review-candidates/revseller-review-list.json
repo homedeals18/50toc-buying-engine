@@ -1,6 +1,6 @@
 {
   "engine": "revseller-review-candidates-v1",
-  "generatedAt": "2026-07-13T15:14:11.811Z",
+  "generatedAt": "2026-07-13T15:34:18.255Z",
   "requirements": {
     "calculatesAmazonFees": false,
     "calculatesProfit": false,
@@ -11,7 +11,7 @@
   },
   "totals": {
     "inputProducts": 0,
-    "readyForRevsellerReview": 1,
+    "readyForRevsellerReview": 0,
     "needsMatchReview": 0,
     "noAmazonMatch": 0
   },
@@ -35,18 +35,5 @@
       "available": false
     }
   ],
-  "candidates": [
-    {
-      "store": "BJ's Wholesale Club",
-      "storeProductName": "5-hour ENERGY Fruity Rainbow 24 ct",
-      "purchasePrice": "$43.19",
-      "amazonTitle": "5-hour ENERGY Fruity Rainbow 24 ct",
-      "amazonSellingPrice": "$52.99",
-      "asin": "B0FX3DY3C7",
-      "amazonProductUrl": "https://www.amazon.com/dp/B0FX3DY3C7",
-      "matchConfidence": 95,
-      "matchReason": "Existing Amazon Analysis match",
-      "status": "READY_FOR_REVSELLER_REVIEW"
-    }
-  ]
+  "candidates": []
 }

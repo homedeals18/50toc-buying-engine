@@ -11,7 +11,7 @@ const amazonCatalog = [
 ];
 
 test('review candidate contains only operator RevSeller review fields', () => {
-  const candidate = toReviewCandidate({ store: "BJ's Wholesale Club", brand: 'Acme', productName: 'Acme Protein Bars Chocolate', packageSize: '24 ct 1.4 oz', count: '24 ct', flavor: 'Chocolate', currentPrice: 18 }, amazonCatalog);
+  const candidate = toReviewCandidate({ store: "BJ's Wholesale Club", brand: 'Acme', productName: 'Acme Protein Bars Chocolate', packageSize: '24 ct 1.4 oz', count: '24 ct', flavor: 'Chocolate', currentPrice: 24, finalPurchasePrice: 18, originalPrice: 24, couponDiscount: 6 }, amazonCatalog);
   assert.deepEqual(Object.keys(candidate), ['store', 'storeProductName', 'purchasePrice', 'amazonTitle', 'amazonSellingPrice', 'asin', 'amazonProductUrl', 'matchConfidence', 'matchReason', 'status']);
   assert.equal(candidate.status, 'READY_FOR_REVSELLER_REVIEW');
   assert.equal(candidate.asin, 'BREADY0001');

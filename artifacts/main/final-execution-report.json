@@ -1,6 +1,6 @@
 {
   "pipeline": "main-buying-engine",
-  "completedAt": "2026-07-07T14:02:19.822Z",
+  "completedAt": "2026-07-13T15:34:17.828Z",
   "connectors": [
     {
       "connectorId": "bjs",
@@ -8,6 +8,9 @@
       "status": "missing",
       "severity": "warning",
       "dealProductsPath": "artifacts/bjs/logs/deal-products.json",
+      "repoRoot": "/workspace/50toc-buying-engine",
+      "resolvedDealProductsPath": "/workspace/50toc-buying-engine/artifacts/bjs/logs/deal-products.json",
+      "exists": false,
       "productCount": 0,
       "warning": "Missing BJ's Wholesale Club deal-products.json at artifacts/bjs/logs/deal-products.json",
       "message": "Warning: Missing BJ's Wholesale Club deal-products.json at artifacts/bjs/logs/deal-products.json"
@@ -18,9 +21,25 @@
       "status": "missing",
       "severity": "warning",
       "dealProductsPath": "artifacts/costco_business_center/logs/deal-products.json",
+      "repoRoot": "/workspace/50toc-buying-engine",
+      "resolvedDealProductsPath": "/workspace/50toc-buying-engine/artifacts/costco_business_center/logs/deal-products.json",
+      "exists": false,
       "productCount": 0,
       "warning": "Missing Costco Business Center deal-products.json at artifacts/costco_business_center/logs/deal-products.json",
       "message": "Warning: Missing Costco Business Center deal-products.json at artifacts/costco_business_center/logs/deal-products.json"
+    },
+    {
+      "connectorId": "sams_club",
+      "connectorName": "Sam's Club",
+      "status": "missing",
+      "severity": "warning",
+      "dealProductsPath": "artifacts/sams_club/logs/deal-products.json",
+      "repoRoot": "/workspace/50toc-buying-engine",
+      "resolvedDealProductsPath": "/workspace/50toc-buying-engine/artifacts/sams_club/logs/deal-products.json",
+      "exists": false,
+      "productCount": 0,
+      "warning": "Missing Sam's Club deal-products.json at artifacts/sams_club/logs/deal-products.json",
+      "message": "Warning: Missing Sam's Club deal-products.json at artifacts/sams_club/logs/deal-products.json"
     }
   ],
   "totals": {
