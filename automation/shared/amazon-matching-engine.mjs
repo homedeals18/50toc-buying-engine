@@ -204,7 +204,16 @@ export function scoreAmazonCandidate(storeProduct, amazonProduct) {
 
 export function matchProductToAmazon(storeProduct, amazonCatalog = loadAmazonCatalogFromEnv()) {
   const candidates = amazonCatalog.map((amazonProduct) => scoreAmazonCandidate(storeProduct, amazonProduct));
-  const best = candidates.sort((a, b) => b.confidenceScore - a.confidenceScore)[0];
+  const candidateTieBreaker = (candidate) => {
+    const amazon = candidate.amazon ?? {};
+    return [
+      sameBrand(storeProduct, amazon) ? 20 : 0,
+      hasSharedNameTokens(storeProduct, amazon) ? 10 : 0,
+      sameUpc(storeProduct, amazon) ? 5 : 0,
+      sameAsin(storeProduct, amazon) ? 5 : 0
+    ].reduce((sum, value) => sum + value, 0);
+  };
+  const best = candidates.sort((a, b) => (b.confidenceScore - a.confidenceScore) || (candidateTieBreaker(b) - candidateTieBreaker(a)))[0];
   const isMatched = Boolean(best && best.confidenceScore >= confidenceRules.brandName && !best.needsReview && !best.rejectionReason);
   const needsReview = Boolean(best?.needsReview) || !isMatched;
   return {
@@ -215,9 +224,10 @@ export function matchProductToAmazon(storeProduct, amazonCatalog = loadAmazonCat
     confidenceScore: best?.confidenceScore ?? 0,
     matchReason: isMatched ? best.matchReason : 'Below 80 = Needs Review',
     rejectionReason: best?.rejectionReason ?? (isMatched ? null : 'Below 80 confidence.'),
-    amazonAsin: isMatched ? best.amazon.asin : null,
-    amazonTitle: isMatched ? best.amazon.title : null,
-    amazonCurrentSellingPrice: isMatched ? best.amazon.currentSellingPrice : null
+    amazonAsin: isMatched || best?.needsReview ? best.amazon.asin : null,
+    amazonTitle: isMatched || best?.needsReview ? best.amazon.title : null,
+    amazonCurrentSellingPrice: isMatched || best?.needsReview ? best.amazon.currentSellingPrice : null,
+    amazonProductUrl: isMatched || best?.needsReview ? (best.amazon.productUrl ?? best.amazon.amazonProductUrl ?? null) : null
   };
 }
 

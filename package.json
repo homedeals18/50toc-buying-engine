@@ -20,6 +20,7 @@
     "run:orchestrator": "node automation/orchestrator/orchestrator.mjs",
     "test:orchestrator": "node --test automation/orchestrator/orchestrator.test.mjs",
     "amazon:attach-check": "node automation/amazon/attach-check.mjs",
-    "doctor": "node automation/dev/doctor.mjs"
+    "doctor": "node automation/dev/doctor.mjs",
+    "build:review-list": "node automation/review-candidates/revseller-review-list.mjs"
   }
 }
