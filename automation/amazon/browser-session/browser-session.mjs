@@ -7,13 +7,13 @@ export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.met
 export const amazonHomeUrl = 'https://www.amazon.com/';
 export const revsellerHomeUrl = 'https://www.revseller.com/';
 export const revsellerUnavailableMessage = 'RevSeller extension is not available in the configured Chrome profile.';
-export const chromeAttachRequiredMessage = 'Chrome attach mode requires an already-running Chrome instance with remote debugging enabled. Start your existing Chrome session with --remote-debugging-port=9222, keep the Amazon and RevSeller logins active in that browser, and set AMAZON_CHROME_CDP_ENDPOINT if you use a non-default endpoint. The automation will not launch Chrome, create another Chrome window, or create a temporary profile.';
+export const chromeAttachRequiredMessage = 'Chrome attach mode requires the dedicated Amazon automation Chrome profile to be running with remote debugging enabled. Run start-chrome-debug.bat, complete the one-time Amazon and RevSeller setup in that dedicated profile, keep that browser open, and set AMAZON_CHROME_CDP_ENDPOINT if you use a non-default endpoint. The automation will not create temporary profiles.';
 export const defaultAmazonChromeCdpEndpoint = 'http://127.0.0.1:9222';
 export const revsellerVerificationAmazonProductUrl = process.env.REVSELLER_VERIFICATION_AMAZON_PRODUCT_URL ?? 'https://www.amazon.com/dp/B00000JY1X';
 
 const defaultWindowsChromeConfig = {
   chromePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-  userDataDir: 'C:\\Users\\Nir\\AppData\\Local\\Google\\Chrome\\User Data',
+  userDataDir: 'C:\\Users\\Nir\\AppData\\Local\\Google\\Chrome\\Amazon Automation User Data',
   profileDirectory: 'Default'
 };
 
@@ -27,7 +27,7 @@ export function resolveChromePath(chromePath = process.env.AMAZON_CHROME_PATH ??
 }
 
 export function resolveUserDataDir(userDataDir = process.env.AMAZON_CHROME_USER_DATA_DIR ?? (process.platform === 'win32' ? defaultWindowsChromeConfig.userDataDir : undefined)) {
-  if (!userDataDir) throw new Error('AMAZON_CHROME_USER_DATA_DIR must point to the existing Chrome User Data directory that contains the RevSeller profile.');
+  if (!userDataDir) throw new Error('AMAZON_CHROME_USER_DATA_DIR must point to the dedicated Amazon automation Chrome user-data directory that contains the RevSeller profile. Run start-chrome-debug.bat once to create it.');
   const resolvedUserDataDir = path.resolve(userDataDir);
   if (!existsSync(resolvedUserDataDir)) throw new Error(`AMAZON_CHROME_USER_DATA_DIR does not exist: ${resolvedUserDataDir}`);
   return resolvedUserDataDir;

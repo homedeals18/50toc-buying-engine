@@ -18,9 +18,14 @@ test('checkDebugVersion confirms a Chrome remote debugging payload', async () =>
 
 test('runAttachCheck opens or inspects Amazon and confirms RevSeller', async () => {
   const calls = [];
+  let currentUrl = 'about:blank';
   const fakePage = {
-    url: () => 'about:blank',
-    goto: async (url) => calls.push(['goto', url])
+    url: () => currentUrl,
+    goto: async (url) => { currentUrl = url; calls.push(['goto', url]); },
+    locator: () => ({
+      innerText: async () => currentUrl.includes('amazon.com') ? 'Account & Lists Orders' : 'RevSeller dashboard',
+      first: () => ({ isVisible: async () => false })
+    })
   };
   const fakeContext = {
     pages: () => [fakePage],
@@ -36,19 +41,25 @@ test('runAttachCheck opens or inspects Amazon and confirms RevSeller', async () 
     amazonProductUrl: 'https://www.amazon.com/dp/B00000JY1X'
   });
 
-  assert.deepEqual(calls, [['goto', 'https://www.amazon.com/dp/B00000JY1X'], ['close']]);
+  assert.deepEqual(calls, [['goto', 'https://www.amazon.com/dp/B00000JY1X'], ['goto', 'https://www.amazon.com/'], ['goto', 'https://www.revseller.com/'], ['close']]);
   assert.equal(results.find((result) => result.name === 'Chrome attach mode is available')?.status, 'PASS');
   assert.equal(results.find((result) => result.name === 'Amazon page opened or inspected')?.status, 'PASS');
   assert.equal(results.find((result) => result.name === 'RevSeller is loaded')?.status, 'PASS');
+  assert.equal(results.find((result) => result.name === 'Amazon login is active')?.status, 'PASS');
 });
 
 
 test('runAttachCheck reports validation steps and printAttachCheckResults prints PASS', async () => {
   const steps = [];
   const lines = [];
+  let currentUrl = 'https://www.amazon.com/dp/B00000JY1X';
   const fakePage = {
-    url: () => 'https://www.amazon.com/dp/B00000JY1X',
-    goto: async () => assert.fail('should not navigate when already on Amazon')
+    url: () => currentUrl,
+    goto: async (url) => { currentUrl = url; },
+    locator: () => ({
+      innerText: async () => currentUrl.includes('amazon.com') ? 'Account & Lists Orders' : 'RevSeller dashboard',
+      first: () => ({ isVisible: async () => false })
+    })
   };
   const fakeContext = {
     pages: () => [fakePage],

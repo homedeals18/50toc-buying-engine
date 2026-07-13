@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { closeAmazonBrowserSession, defaultAmazonChromeCdpEndpoint, getAmazonBrowserSession, revsellerUnavailableMessage, revsellerVerificationAmazonProductUrl } from './browser-session/browser-session.mjs';
+import { closeAmazonBrowserSession, defaultAmazonChromeCdpEndpoint, getAmazonBrowserSession, revsellerUnavailableMessage, probeLoginSessions, revsellerVerificationAmazonProductUrl } from './browser-session/browser-session.mjs';
 
 export function versionUrlForEndpoint(endpoint) {
   return new URL('/json/version', endpoint.endsWith('/') ? endpoint : `${endpoint}/`).toString();
@@ -51,6 +51,8 @@ export async function runAttachCheck({ endpoint = process.env.AMAZON_CHROME_CDP_
     pass('Amazon page opened or inspected', page.url?.() ?? amazonProductUrl);
     const revseller = context.amazonBrowserSession?.revsellerExtension;
     revseller ? pass('RevSeller is loaded', revseller.source ?? revseller.name ?? 'detected') : fail('RevSeller is loaded', 'No RevSeller metadata was found on the attached session.');
+    const logins = await probeLoginSessions(page);
+    logins.amazon.loggedIn ? pass('Amazon login is active', logins.amazon.url) : fail('Amazon login is active', 'Sign in to Amazon in the dedicated automation Chrome profile opened by start-chrome-debug.bat.');
   } catch (error) {
     fail('Amazon page opened or inspected', error.message === revsellerUnavailableMessage ? 'RevSeller extension is not available in the attached Chrome profile.' : error.message);
     if (error.message === revsellerUnavailableMessage) fail('RevSeller is loaded', 'Install/sign in to RevSeller in the attached Chrome profile.');
