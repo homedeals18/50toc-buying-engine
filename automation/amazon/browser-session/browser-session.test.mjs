@@ -3,7 +3,7 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { chromeAttachRequiredMessage, closeAmazonBrowserSession, findRevsellerExtension, getAmazonBrowserSession, inspectChromeProfileExtensions, launchAmazonBrowserSession, resolveChromeAttachConfig, resolveChromeProfileConfig, revsellerUnavailableMessage, verifyRevsellerExtensionAvailable } from './browser-session.mjs';
+import { chromeAttachRequiredMessage, closeAmazonBrowserSession, findRevsellerExtension, getAmazonBrowserSession, inspectChromeProfileExtensions, launchAmazonBrowserSession, resolveChromeAttachConfig, resolveChromeProfileConfig, revsellerUnavailableMessage, verifyRevsellerExtensionAvailable, selectExistingAmazonProductPage } from './browser-session.mjs';
 
 async function createChromeFixture({ withRevseller = true } = {}) {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'amazon-browser-session-'));
@@ -79,15 +79,26 @@ test('inspects the configured Chrome profile Extensions directory and resolves l
   }
 });
 
+
+test('selects an already-open Amazon product page before other pages', () => {
+  const productPage = { url: () => 'https://www.amazon.com/Nexxus-Humectress-Moisturizing-ProteinFusion-Conditioner/dp/B012345678' };
+  const pages = [
+    { url: () => 'https://www.amazon.com/' },
+    productPage,
+    { url: () => 'https://www.revseller.com/' }
+  ];
+  assert.equal(selectExistingAmazonProductPage(pages), productPage);
+});
+
 test('falls back to live Amazon product page DOM verification when profile inspection misses RevSeller', async () => {
   const fixture = await createChromeFixture({ withRevseller: false });
   const calls = [];
   const fakePage = {
     goto: async (url) => { calls.push(['goto', url]); },
     waitForTimeout: async () => {},
-    url: () => 'https://www.amazon.com/dp/B00000JY1X',
+    url: () => 'https://www.amazon.com/Nexxus-Humectress-Moisturizing-ProteinFusion-Conditioner/dp/B012345678',
     frames: () => [{
-      evaluate: async () => ({ url: 'https://www.amazon.com/dp/B00000JY1X', matched: [{ tagName: 'DIV', id: 'revseller-root' }], textMentionsRevseller: true })
+      evaluate: async () => ({ url: 'https://www.amazon.com/Nexxus-Humectress-Moisturizing-ProteinFusion-Conditioner/dp/B012345678', matched: [{ tagName: 'DIV', id: 'revseller-root' }], textMentionsRevseller: true })
     }]
   };
   const fakeContext = { pages: () => [fakePage], close: async () => { calls.push(['close']); } };
@@ -96,10 +107,10 @@ test('falls back to live Amazon product page DOM verification when profile inspe
   };
 
   try {
-    const context = await launchAmazonBrowserSession({ chromium, ...fixture, launchOptions: { amazonProductUrl: 'https://www.amazon.com/dp/B00000JY1X' } });
+    const context = await launchAmazonBrowserSession({ chromium, ...fixture, launchOptions: { amazonProductUrl: null } });
     assert.equal(context, fakeContext);
     assert.equal(context.amazonBrowserSession.revsellerExtension.source, 'live Amazon product page DOM');
-    assert.deepEqual(calls, [['goto', 'https://www.amazon.com/dp/B00000JY1X']]);
+    assert.deepEqual(calls, []);
   } finally {
     await rm(fixture.tempDir, { recursive: true, force: true });
   }
