@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { closeAmazonBrowserSession, defaultAmazonChromeCdpEndpoint, getAmazonBrowserSession, revsellerUnavailableMessage, probeLoginSessions, revsellerVerificationAmazonProductUrl } from './browser-session/browser-session.mjs';
+import { closeAmazonBrowserSession, defaultAmazonChromeCdpEndpoint, getAmazonBrowserSession, revsellerUnavailableMessage, revsellerVerificationAmazonProductUrl, selectExistingAmazonProductPage, verifyRevsellerPresenceFromLiveAmazonPage } from './browser-session/browser-session.mjs';
 
 export function versionUrlForEndpoint(endpoint) {
   return new URL('/json/version', endpoint.endsWith('/') ? endpoint : `${endpoint}/`).toString();
@@ -46,16 +46,17 @@ export async function runAttachCheck({ endpoint = process.env.AMAZON_CHROME_CDP_
 
   try {
     const context = await getSession({ chromium: chromium ?? await loadChromium(), launchOptions: { amazonProductUrl } });
-    const page = context.pages()[0] ?? await context.newPage();
-    if (!String(page.url?.() ?? '').includes('amazon.com')) await page.goto(amazonProductUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    pass('Amazon page opened or inspected', page.url?.() ?? amazonProductUrl);
-    const revseller = context.amazonBrowserSession?.revsellerExtension;
-    revseller ? pass('RevSeller is loaded', revseller.source ?? revseller.name ?? 'detected') : fail('RevSeller is loaded', 'No RevSeller metadata was found on the attached session.');
-    const logins = await probeLoginSessions(page);
-    logins.amazon.loggedIn ? pass('Amazon login is active', logins.amazon.url) : fail('Amazon login is active', 'Sign in to Amazon in the dedicated automation Chrome profile opened by start-chrome-debug.bat.');
+    const page = selectExistingAmazonProductPage(context.pages());
+    const liveVerification = await verifyRevsellerPresenceFromLiveAmazonPage(context, { amazonProductUrl });
+    const attachedPageUrl = liveVerification.pageUrl ?? page?.url?.() ?? null;
+    attachedPageUrl ? pass('attached page URL', attachedPageUrl) : fail('attached page URL', liveVerification.error ?? 'No already-open Amazon product page matched https://www.amazon.com/*/dp/*.');
+    liveVerification.present ? pass('RevSeller panel detected', liveVerification.source) : fail('RevSeller panel detected', liveVerification.error ?? 'RevSeller panel was not detected in the live DOM of the attached Amazon product page.');
+    const amazonText = page ? await page.locator('body').innerText({ timeout: 5_000 }).catch(() => '') : '';
+    const amazonLoggedIn = /\baccount\s*&\s*lists\b/i.test(amazonText) && !/\bsign\s*in\b/i.test(amazonText.slice(0, 1500));
+    amazonLoggedIn ? pass('Amazon login detected', attachedPageUrl) : fail('Amazon login detected', 'Sign in to Amazon in the attached Chrome profile.');
   } catch (error) {
     fail('Amazon page opened or inspected', error.message === revsellerUnavailableMessage ? 'RevSeller extension is not available in the attached Chrome profile.' : error.message);
-    if (error.message === revsellerUnavailableMessage) fail('RevSeller is loaded', 'Install/sign in to RevSeller in the attached Chrome profile.');
+    if (error.message === revsellerUnavailableMessage) fail('RevSeller panel detected', 'Install/sign in to RevSeller in the attached Chrome profile.');
   } finally {
     await closeSession().catch(() => undefined);
   }
@@ -64,6 +65,13 @@ export async function runAttachCheck({ endpoint = process.env.AMAZON_CHROME_CDP_
 }
 
 export function printAttachCheckResults(results, { log = console.log } = {}) {
+  const attachedPage = results.find((result) => result.name === 'attached page URL');
+  const revsellerPanel = results.find((result) => result.name === 'RevSeller panel detected');
+  const amazonLogin = results.find((result) => result.name === 'Amazon login detected');
+  if (attachedPage) log(`attached page URL: ${attachedPage.detail ?? 'unavailable'}`);
+  if (revsellerPanel) log(`RevSeller panel detected: ${revsellerPanel.status}`);
+  if (amazonLogin) log(`Amazon login detected: ${amazonLogin.status}`);
+
   const failures = results.filter((result) => result.status === 'FAIL');
   if (failures.length === 0) {
     log('PASS');
@@ -83,5 +91,6 @@ function isDirectRun() {
 
 if (isDirectRun()) {
   const results = await runAttachCheck({ onStep: console.log });
-  process.exitCode = printAttachCheckResults(results) === 0 ? 0 : 1;
+  const failures = printAttachCheckResults(results);
+  process.exitCode = results.some((result) => result.name === 'RevSeller panel detected' && result.status === 'PASS') ? 0 : failures === 0 ? 0 : 1;
 }

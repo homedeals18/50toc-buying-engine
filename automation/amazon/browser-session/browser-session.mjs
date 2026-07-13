@@ -9,7 +9,7 @@ export const revsellerHomeUrl = 'https://www.revseller.com/';
 export const revsellerUnavailableMessage = 'RevSeller extension is not available in the configured Chrome profile.';
 export const chromeAttachRequiredMessage = 'Chrome attach mode requires the dedicated Amazon automation Chrome profile to be running with remote debugging enabled. Run start-chrome-debug.bat, complete the one-time Amazon and RevSeller setup in that dedicated profile, keep that browser open, and set AMAZON_CHROME_CDP_ENDPOINT if you use a non-default endpoint. The automation will not create temporary profiles.';
 export const defaultAmazonChromeCdpEndpoint = 'http://127.0.0.1:9222';
-export const revsellerVerificationAmazonProductUrl = process.env.REVSELLER_VERIFICATION_AMAZON_PRODUCT_URL ?? 'https://www.amazon.com/dp/B00000JY1X';
+export const revsellerVerificationAmazonProductUrl = process.env.REVSELLER_VERIFICATION_AMAZON_PRODUCT_URL ?? null;
 
 const defaultWindowsChromeConfig = {
   chromePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -197,10 +197,24 @@ export async function verifyRevsellerExtensionAvailable(profilePath) {
   return extension;
 }
 
-async function verifyRevsellerPresenceFromLiveAmazonPage(context, { amazonProductUrl = revsellerVerificationAmazonProductUrl } = {}) {
-  const page = context.pages()[0] ?? await context.newPage();
-  await page.goto(amazonProductUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-  await page.waitForTimeout(3_000).catch(() => undefined);
+export function isAmazonProductPageUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return /^(.+\.)?amazon\.com$/i.test(parsed.hostname) && /\/dp\//i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+export function selectExistingAmazonProductPage(pages = []) {
+  return pages.find((page) => isAmazonProductPageUrl(String(page.url?.() ?? ''))) ?? null;
+}
+
+export async function verifyRevsellerPresenceFromLiveAmazonPage(context, { amazonProductUrl = revsellerVerificationAmazonProductUrl } = {}) {
+  const page = selectExistingAmazonProductPage(context.pages()) ?? (amazonProductUrl ? (context.pages()[0] ?? await context.newPage()) : null);
+  if (!page) return { present: false, source: 'live Amazon product page DOM', pageUrl: null, frameResults: [], error: 'No already-open Amazon product page matched https://www.amazon.com/*/dp/*.' };
+  if (amazonProductUrl && !isAmazonProductPageUrl(String(page.url?.() ?? ''))) await page.goto(amazonProductUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  await (page.waitForTimeout?.(3_000) ?? Promise.resolve()).catch(() => undefined);
   const selector = '[id*="revseller" i], [class*="revseller" i], [data-testid*="revseller" i], [data-test*="revseller" i], [data-extension*="revseller" i], [data-extension-id*="revseller" i], [data-chrome-extension*="revseller" i], [aria-label*="revseller" i], iframe[src*="revseller" i], iframe[src^="chrome-extension://"], [id^="rs-"], [class^="rs-"], [class*=" rs-"], [data-rs], [data-rs-root], [data-revseller]';
   const frameResults = await Promise.all(page.frames().map(async (frame) => frame.evaluate((liveSelector) => {
     const text = document.body?.innerText || document.body?.textContent || '';
