@@ -3,12 +3,166 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaultConnectorRegistry, toProjectRelativePath } from '../main/run-main-buying-engine.mjs';
-import { loadAmazonCatalogFromEnv, matchProductToAmazon } from '../shared/amazon-matching-engine.mjs';
+import { defaultProductDiscoveryPath, defaultAmazonAnalysisPath } from '../shared/amazon-product-discovery.mjs';
+import { defaultMatchingReportPath, loadAmazonCatalogFromEnv, matchProductToAmazon } from '../shared/amazon-matching-engine.mjs';
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const defaultReviewCandidatesRoot = path.join(repositoryRoot, 'artifacts', 'review-candidates');
 export const defaultReviewCandidatesJsonPath = path.join(defaultReviewCandidatesRoot, 'revseller-review-list.json');
 export const defaultReviewCandidatesCsvPath = path.join(defaultReviewCandidatesRoot, 'revseller-review-list.csv');
+
+export const defaultAmazonArtifactPaths = Object.freeze({
+  productDiscoveryPath: defaultProductDiscoveryPath,
+  matchingReportPath: defaultMatchingReportPath,
+  amazonAnalysisPath: defaultAmazonAnalysisPath
+});
+
+function clean(value) {
+  return String(value ?? '').trim().replace(/\s+/g, ' ');
+}
+
+function normalized(value) {
+  return clean(value).toLowerCase();
+}
+
+function digitsOnly(value) {
+  return clean(value).replace(/\D/g, '');
+}
+
+function normalizedIdentityValue(value) {
+  return normalized(value).replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function productIdentityKey(product) {
+  const explicit = product.productIdentityKey ?? product.identityKey ?? product.productKey ?? product.sourceProductKey ?? product.sourceProductId ?? product.productId ?? product.id ?? product.itemId ?? product.sku;
+  if (clean(explicit)) return `id:${normalizedIdentityValue(explicit)}`;
+  return null;
+}
+
+function upcIdentityKey(product) {
+  const upc = digitsOnly(product.upc ?? product.upcCode ?? product.gtin ?? product.barcode);
+  return upc ? `upc:${upc}` : null;
+}
+
+function fallbackIdentityKey(product) {
+  const brand = normalizedIdentityValue(product.brand);
+  const name = normalizedIdentityValue(product.productName ?? product.title ?? product.name);
+  const size = normalizedIdentityValue(product.packageSize ?? product.size ?? product.unitSize ?? product.count ?? product.packageCount);
+  return brand && name && size ? `fallback:${brand}|${name}|${size}` : null;
+}
+
+function identityKeys(product) {
+  return [productIdentityKey(product), upcIdentityKey(product), fallbackIdentityKey(product)].filter(Boolean);
+}
+
+function normalizeExistingAmazonProduct(product = {}) {
+  const asin = clean(product.asin ?? product.amazonAsin) || null;
+  return {
+    ...product,
+    asin,
+    title: clean(product.title ?? product.amazonTitle ?? product.productTitle ?? product.productName) || null,
+    currentSellingPrice: formatMoney(product.currentSellingPrice ?? product.amazonCurrentSellingPrice ?? product.amazonSellingPrice ?? product.currentPrice ?? product.price),
+    productUrl: product.productUrl ?? product.amazonProductUrl ?? amazonProductUrl(asin)
+  };
+}
+
+function artifactMatchFromDiscovery(entry) {
+  if (!entry?.amazonProduct?.asin && !entry?.amazonAsin) return null;
+  const amazonProduct = normalizeExistingAmazonProduct(entry.amazonProduct ?? entry);
+  return {
+    sourceProduct: entry.sourceProduct ?? entry.storeProduct ?? entry.product ?? null,
+    amazonProduct,
+    asin: amazonProduct.asin,
+    confidenceScore: entry.matchScore ?? entry.confidenceScore ?? 0,
+    matchReason: entry.matchReason ?? 'Existing Amazon Product Discovery match',
+    matched: entry.matched ?? true,
+    source: 'product-discovery'
+  };
+}
+
+function artifactMatchFromMatchingReport(entry) {
+  if (!entry?.amazonAsin && !entry?.amazonProduct?.asin) return null;
+  const amazonProduct = normalizeExistingAmazonProduct(entry.amazonProduct ?? {
+    asin: entry.amazonAsin,
+    title: entry.amazonTitle,
+    currentSellingPrice: entry.amazonCurrentSellingPrice,
+    productUrl: entry.amazonProductUrl
+  });
+  return {
+    sourceProduct: entry.sourceProduct ?? entry.storeProduct ?? entry.product ?? null,
+    amazonProduct,
+    asin: amazonProduct.asin,
+    confidenceScore: entry.confidenceScore ?? 0,
+    matchReason: entry.rejectionReason ?? entry.matchReason ?? 'Existing Amazon Matching Engine match',
+    matched: entry.matched ?? false,
+    needsReview: entry.needsReview,
+    source: 'matching-report'
+  };
+}
+
+function artifactMatchFromAnalysis(report) {
+  if (!report?.amazonProduct?.asin) return null;
+  const amazonProduct = normalizeExistingAmazonProduct({ ...report.amazonProduct, currentSellingPrice: report.amazonProduct.currentSellingPrice ?? report.amazonProduct.currentPrice });
+  return {
+    sourceProduct: report.storeProduct ?? report.sourceProduct ?? null,
+    amazonProduct,
+    asin: amazonProduct.asin,
+    confidenceScore: report.matchScore ?? 0,
+    matchReason: 'Existing Amazon Analysis match',
+    matched: true,
+    source: 'amazon-analysis'
+  };
+}
+
+async function readJsonIfExists(filePath) {
+  if (!filePath || !existsSync(filePath)) return null;
+  return JSON.parse(await readFile(filePath, 'utf8'));
+}
+
+export async function loadExistingAmazonResults({ productDiscoveryPath = defaultAmazonArtifactPaths.productDiscoveryPath, matchingReportPath = defaultAmazonArtifactPaths.matchingReportPath, amazonAnalysisPath = defaultAmazonArtifactPaths.amazonAnalysisPath } = {}) {
+  const matches = [];
+  const discovery = await readJsonIfExists(productDiscoveryPath);
+  for (const entry of discovery?.discoveries ?? []) {
+    const match = artifactMatchFromDiscovery(entry);
+    if (match) matches.push(match);
+  }
+  const matchingReport = await readJsonIfExists(matchingReportPath);
+  for (const entry of matchingReport?.matches ?? []) {
+    const match = artifactMatchFromMatchingReport(entry);
+    if (match) matches.push(match);
+  }
+  const analysis = await readJsonIfExists(amazonAnalysisPath);
+  const analysisMatch = artifactMatchFromAnalysis(analysis);
+  if (analysisMatch) matches.push(analysisMatch);
+  return matches;
+}
+
+function findExistingAmazonMatch(product, existingAmazonResults = []) {
+  const keys = identityKeys(product);
+  for (const key of keys) {
+    const match = existingAmazonResults.find((entry) => entry.sourceProduct && identityKeys(entry.sourceProduct).includes(key));
+    if (match) return match;
+  }
+  return null;
+}
+
+function matchFromExistingResult(product, existingResult) {
+  if (!existingResult) return null;
+  const verification = matchProductToAmazon(product, [existingResult.amazonProduct]);
+  const confidenceScore = existingResult.confidenceScore ?? verification.confidenceScore ?? 0;
+  const packSizeVerified = verification.matched && confidenceScore >= 90;
+  return {
+    matched: packSizeVerified,
+    needsReview: !packSizeVerified,
+    confidenceScore,
+    matchReason: packSizeVerified ? (verification.matchReason ?? existingResult.matchReason) : (verification.rejectionReason ?? existingResult.matchReason ?? 'Existing ASIN match requires pack/size review'),
+    rejectionReason: packSizeVerified ? null : (verification.rejectionReason ?? existingResult.matchReason ?? 'Existing ASIN match requires pack/size review'),
+    amazonAsin: existingResult.asin,
+    amazonTitle: existingResult.amazonProduct.title,
+    amazonCurrentSellingPrice: existingResult.amazonProduct.currentSellingPrice,
+    amazonProductUrl: existingResult.amazonProduct.productUrl
+  };
+}
 
 function moneyToNumber(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -47,8 +201,9 @@ export async function loadAvailableStoreProducts(connectors = defaultConnectorRe
   return { products, sources };
 }
 
-export function toReviewCandidate(product, amazonCatalog = loadAmazonCatalogFromEnv()) {
-  const match = matchProductToAmazon(product, amazonCatalog);
+export function toReviewCandidate(product, amazonCatalog = loadAmazonCatalogFromEnv(), existingAmazonResults = []) {
+  const existingMatch = matchFromExistingResult(product, findExistingAmazonMatch(product, existingAmazonResults));
+  const match = existingMatch ?? matchProductToAmazon(product, amazonCatalog);
   const hasAmazonCandidate = Boolean(match.amazonAsin);
   const status = match.matched
     ? 'READY_FOR_REVSELLER_REVIEW'
@@ -81,9 +236,10 @@ export function reviewCandidatesToCsv(candidates) {
   return [fields.join(','), ...candidates.map((candidate) => fields.map((field) => csvEscape(candidate[field])).join(','))].join('\n') + '\n';
 }
 
-export async function buildReviewList({ connectors = defaultConnectorRegistry, amazonCatalog = loadAmazonCatalogFromEnv(), jsonPath = defaultReviewCandidatesJsonPath, csvPath = defaultReviewCandidatesCsvPath } = {}) {
+export async function buildReviewList({ connectors = defaultConnectorRegistry, amazonCatalog = loadAmazonCatalogFromEnv(), existingAmazonResults, amazonArtifactPaths = defaultAmazonArtifactPaths, jsonPath = defaultReviewCandidatesJsonPath, csvPath = defaultReviewCandidatesCsvPath } = {}) {
   const { products, sources } = await loadAvailableStoreProducts(connectors);
-  const candidates = products.map((product) => toReviewCandidate(product, amazonCatalog));
+  const reusableAmazonResults = existingAmazonResults ?? await loadExistingAmazonResults(amazonArtifactPaths);
+  const candidates = products.map((product) => toReviewCandidate(product, amazonCatalog, reusableAmazonResults));
   const report = {
     engine: 'revseller-review-candidates-v1',
     generatedAt: new Date().toISOString(),

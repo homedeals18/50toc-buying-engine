@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { buildReviewList, reviewCandidatesToCsv, toReviewCandidate } from './revseller-review-list.mjs';
+import { buildReviewList, loadExistingAmazonResults, reviewCandidatesToCsv, toReviewCandidate } from './revseller-review-list.mjs';
 
 const amazonCatalog = [
   { asin: 'BREADY0001', brand: 'Acme', title: 'Acme Protein Bars Chocolate 24 ct 1.4 oz', packageSize: '24 ct 1.4 oz', count: '24 ct', flavor: 'Chocolate', currentSellingPrice: '$29.99' },
@@ -34,6 +34,61 @@ test('no strict Amazon match becomes NO_AMAZON_MATCH', () => {
   const candidate = toReviewCandidate({ store: 'Costco Business Center', brand: 'Other', productName: 'Other Snack', packageSize: '1 ct 8 oz', count: '1 ct', currentPrice: '$4.00' }, amazonCatalog);
   assert.equal(candidate.status, 'NO_AMAZON_MATCH');
   assert.equal(candidate.asin, null);
+});
+
+test('existing Amazon discovery match keeps known 5-hour Energy ASIN out of NO_AMAZON_MATCH', () => {
+  const storeProduct = {
+    id: 'five-hour-energy-extra-strength-24ct-1-93floz',
+    store: "BJ's Wholesale Club",
+    brand: '5-hour Energy',
+    productName: '5-hour Energy Extra Strength Berry, 24 ct./1.93 fl. oz.',
+    packageSize: '24 ct 1.93 fl oz',
+    count: '24 ct',
+    currentPrice: '$43.19'
+  };
+  const existingAmazonResults = [{
+    source: 'product-discovery',
+    sourceProduct: { ...storeProduct },
+    asin: 'B0FX3DY3C7',
+    confidenceScore: 95,
+    matchReason: 'Existing Amazon Product Discovery match',
+    matched: true,
+    amazonProduct: {
+      asin: 'B0FX3DY3C7',
+      title: '5-hour Energy Extra Strength Berry Energy Shot, 1.93 Fl Oz, 24 Count',
+      currentSellingPrice: '$52.99',
+      productUrl: 'https://www.amazon.com/dp/B0FX3DY3C7',
+      brand: '5-hour Energy',
+      packageSize: '24 ct 1.93 fl oz',
+      count: '24 Count'
+    }
+  }];
+
+  const candidate = toReviewCandidate(storeProduct, [], existingAmazonResults);
+
+  assert.equal(candidate.asin, 'B0FX3DY3C7');
+  assert.notEqual(candidate.status, 'NO_AMAZON_MATCH');
+  assert.equal(candidate.status, 'READY_FOR_REVSELLER_REVIEW');
+  assert.equal(candidate.matchConfidence, 95);
+});
+
+test('loadExistingAmazonResults reads reusable Amazon artifacts without searching', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'review-list-artifacts-'));
+  const productDiscoveryPath = path.join(tempRoot, 'product-discovery.json');
+  const matchingReportPath = path.join(tempRoot, 'matching-report.json');
+  const amazonAnalysisPath = path.join(tempRoot, 'amazon-analysis.json');
+
+  try {
+    await writeFile(productDiscoveryPath, JSON.stringify({ discoveries: [{ sourceProduct: { id: 'p1', brand: 'Acme', productName: 'Bars', packageSize: '24 ct' }, matched: true, matchScore: 95, amazonProduct: { asin: 'B0FX3DY3C7', title: 'Acme Bars 24 ct', currentPrice: '$19.99' } }] }));
+    await writeFile(matchingReportPath, JSON.stringify({ matches: [{ sourceProduct: { id: 'p2' }, matched: true, confidenceScore: 92, amazonAsin: 'BMATCH0001', amazonTitle: 'Matched Item' }] }));
+    await writeFile(amazonAnalysisPath, JSON.stringify({ storeProduct: { id: 'p3' }, amazonProduct: { asin: 'BANALYZE01', title: 'Analyzed Item' } }));
+
+    const matches = await loadExistingAmazonResults({ productDiscoveryPath, matchingReportPath, amazonAnalysisPath });
+
+    assert.deepEqual(matches.map((match) => match.asin), ['B0FX3DY3C7', 'BMATCH0001', 'BANALYZE01']);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test('buildReviewList integrates available BJ, Costco Business Center, and Sam\'s Club products and writes JSON plus CSV', async () => {
