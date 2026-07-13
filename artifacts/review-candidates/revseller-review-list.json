@@ -1,0 +1,39 @@
+{
+  "engine": "revseller-review-candidates-v1",
+  "generatedAt": "2026-07-13T14:49:38.088Z",
+  "requirements": {
+    "calculatesAmazonFees": false,
+    "calculatesProfit": false,
+    "calculatesRoi": false,
+    "usesSpApi": false,
+    "usesRevsellerAutomation": false,
+    "cartCheckoutOrPurchase": false
+  },
+  "totals": {
+    "inputProducts": 0,
+    "readyForRevsellerReview": 0,
+    "needsMatchReview": 0,
+    "noAmazonMatch": 0
+  },
+  "sources": [
+    {
+      "store": "BJ's Wholesale Club",
+      "path": "artifacts/bjs/logs/deal-products.json",
+      "productCount": 0,
+      "available": false
+    },
+    {
+      "store": "Costco Business Center",
+      "path": "artifacts/costco_business_center/logs/deal-products.json",
+      "productCount": 0,
+      "available": false
+    },
+    {
+      "store": "Sam's Club",
+      "path": "artifacts/sams_club/logs/deal-products.json",
+      "productCount": 0,
+      "available": false
+    }
+  ],
+  "candidates": []
+}
