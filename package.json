@@ -13,6 +13,8 @@
     "test:revseller-config": "npm --prefix automation/revseller run unit",
     "run:amazon-product-discovery": "node automation/shared/amazon-product-discovery.mjs",
     "run:amazon-analysis": "node automation/shared/amazon-product-discovery.mjs --analysis",
+    "analyze:profit": "node automation/profit-analyzer/profit-analyzer.mjs",
+    "test:profit-analyzer": "node --test automation/profit-analyzer/profit-analyzer.test.mjs",
     "read:revseller": "npm --prefix automation/revseller run read:open-page",
     "run:decision-engine": "node automation/decision-engine/decision-engine.mjs",
     "run:orchestrator": "node automation/orchestrator/orchestrator.mjs",

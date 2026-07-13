@@ -1,0 +1,37 @@
+{
+  "moduleResult": {
+    "status": "WARNING",
+    "startedAt": "2026-07-13T13:01:54.296Z",
+    "completedAt": "2026-07-13T13:01:54.298Z",
+    "durationMs": 2,
+    "inputFile": "artifacts/amazon/product-discovery.json",
+    "outputFile": "artifacts/profit-analyzer/profit-analysis.json",
+    "processedItems": 1,
+    "warnings": [
+      "Amazon SP-API authorization is missing.",
+      "Missing required data: sellingPrice, estimatedAmazonFees"
+    ],
+    "errors": [],
+    "data": {
+      "decision": {
+        "decision": "NEEDS_REVIEW",
+        "reasons": [
+          "Amazon SP-API authorization is missing.",
+          "Missing required data: sellingPrice, estimatedAmazonFees"
+        ],
+        "missingData": [
+          "sellingPrice",
+          "estimatedAmazonFees"
+        ],
+        "confidence": 20
+      }
+    }
+  },
+  "entries": [
+    {
+      "level": "info",
+      "at": "2026-07-13T13:01:54.296Z",
+      "message": "50TOC Profit Analyzer started"
+    }
+  ]
+}
