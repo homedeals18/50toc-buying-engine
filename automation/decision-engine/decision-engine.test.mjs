@@ -57,3 +57,27 @@ test('runDecisionEngine writes artifacts/decision-engine/decision-report.json sh
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+
+test('runDecisionEngine uses Profit Analyzer output before RevSeller fallback', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'decision-engine-profit-'));
+  const configPath = path.join(tempRoot, 'decision-config.json');
+  const mainPath = path.join(tempRoot, 'final-shopping-list.json');
+  const amazonPath = path.join(tempRoot, 'product-discovery.json');
+  const profitPath = path.join(tempRoot, 'profit-analysis.json');
+  const outputPath = path.join(tempRoot, 'decision-report.json');
+
+  await writeFile(configPath, JSON.stringify(config));
+  await writeFile(mainPath, JSON.stringify([{ brand: 'Acme', productName: 'Bars', amazonAsin: 'B000PROFIT', lowestPurchasePrice: 20 }]));
+  await writeFile(amazonPath, JSON.stringify({ discoveries: [{ sourceProduct: { amazonAsin: 'B000PROFIT' }, matched: true, matchScore: 95, amazonProduct: { asin: 'B000PROFIT' } }] }));
+  await writeFile(profitPath, JSON.stringify({ input: { asin: 'B000PROFIT' }, decision: { decision: 'BUY', reasons: ['Profit Analyzer passed'], confidence: 91 }, profitability: { roi: 44 } }));
+
+  try {
+    const report = await runDecisionEngine({ configPath, mainBuyingEnginePath: mainPath, amazonDiscoveryPath: amazonPath, profitAnalysisPath: profitPath, revsellerAnalysisPath: path.join(tempRoot, 'missing-revseller.json'), outputPath });
+    assert.equal(report.firstDecision.decision, 'BUY');
+    assert.equal(report.firstDecision.triggeredRule, 'profit_analyzer_v1');
+    assert.equal(report.firstDecision.metrics.roi, 44);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});

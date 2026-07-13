@@ -1,0 +1,74 @@
+{
+  "engine": "50toc-profit-analyzer-v1",
+  "generatedAt": "2026-07-13T13:01:54.297Z",
+  "source": "Amazon Selling Partner API estimates",
+  "safety": {
+    "estimatesOnly": true,
+    "noCartActions": true,
+    "noListingCreation": true,
+    "noPurchases": true
+  },
+  "input": {
+    "asin": "B0FX3DY3C7",
+    "marketplace": "ATVPDKIKX0DER",
+    "purchaseCost": 43.19,
+    "fulfillmentMethod": "FBA",
+    "inboundShipping": 0,
+    "minimumTargetRoi": 30,
+    "prepCost": 0
+  },
+  "auth": {
+    "status": "missing_authorization",
+    "missingEnvironmentVariables": [
+      "SP_API_CLIENT_ID",
+      "SP_API_CLIENT_SECRET",
+      "SP_API_REFRESH_TOKEN",
+      "SP_API_AWS_ACCESS_KEY_ID",
+      "SP_API_AWS_SECRET_ACCESS_KEY"
+    ],
+    "guide": "docs/profit-analyzer-sp-api-setup.md"
+  },
+  "catalog": null,
+  "pricing": {
+    "missingData": [
+      "sellingPrice"
+    ]
+  },
+  "fees": {
+    "missingData": [
+      "estimatedAmazonFees"
+    ],
+    "errors": []
+  },
+  "restrictions": null,
+  "profitability": {
+    "sellingPrice": null,
+    "estimatedAmazonFees": null,
+    "purchaseCost": 43.19,
+    "inboundShipping": 0,
+    "prepCost": 0,
+    "totalLandedCost": 43.19,
+    "netProceeds": null,
+    "estimatedProfit": null,
+    "roi": null,
+    "minimumTargetRoi": 30,
+    "maxLandedCost": null,
+    "maxPurchaseCost": null,
+    "missingData": [
+      "sellingPrice",
+      "estimatedAmazonFees"
+    ]
+  },
+  "decision": {
+    "decision": "NEEDS_REVIEW",
+    "reasons": [
+      "Amazon SP-API authorization is missing.",
+      "Missing required data: sellingPrice, estimatedAmazonFees"
+    ],
+    "missingData": [
+      "sellingPrice",
+      "estimatedAmazonFees"
+    ],
+    "confidence": 20
+  }
+}

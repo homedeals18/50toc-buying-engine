@@ -9,6 +9,7 @@ export const defaultConfigPath = path.join(repositoryRoot, 'config', 'decision-e
 export const defaultMainBuyingEnginePath = path.join(repositoryRoot, 'artifacts', 'main', 'final-shopping-list.json');
 export const defaultAmazonDiscoveryPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'product-discovery.json');
 export const defaultRevsellerAnalysisPath = path.join(repositoryRoot, 'artifacts', 'revseller', 'revseller-analysis-report.json');
+export const defaultProfitAnalysisPath = path.join(repositoryRoot, 'artifacts', 'profit-analyzer', 'profit-analysis.json');
 export const defaultDecisionReportPath = path.join(repositoryRoot, 'artifacts', 'decision-engine', 'decision-report.json');
 export const defaultExecutionLogPath = path.join(repositoryRoot, 'artifacts', 'decision-engine', 'execution-log.json');
 export const defaultExecutionReportPath = path.join(repositoryRoot, 'artifacts', 'decision-engine', 'module-execution-report.json');
@@ -98,6 +99,22 @@ function normalizeRevsellerReports(revsellerInput) {
   return [];
 }
 
+function normalizeProfitReports(profitInput) {
+  if (Array.isArray(profitInput)) return profitInput;
+  if (Array.isArray(profitInput?.analyses)) return profitInput.analyses;
+  if (Array.isArray(profitInput?.reports)) return profitInput.reports;
+  if (profitInput?.input?.asin || profitInput?.asin) return [profitInput];
+  return [];
+}
+
+function buildProfitIndex(profitInput) {
+  const index = new Map();
+  for (const report of normalizeProfitReports(profitInput)) {
+    for (const key of [productKey({ asin: report.input?.asin ?? report.asin }), productKey(report.input ?? {})].filter((entry) => !entry.endsWith(':') && entry !== 'name:')) index.set(key, report);
+  }
+  return index;
+}
+
 function buildRevsellerIndex(revsellerInput) {
   const index = new Map();
   for (const report of normalizeRevsellerReports(revsellerInput)) {
@@ -124,7 +141,17 @@ function firstFailedThreshold(metrics, thresholds) {
   return null;
 }
 
-export function decideProduct(product, { discovery, revsellerData, config }) {
+export function decideProduct(product, { discovery, revsellerData, profitAnalysis, config }) {
+  if (profitAnalysis?.decision) {
+    const decisionMap = { BUY: DECISIONS.BUY, "DON'T_BUY": DECISIONS.DONT_BUY, NEEDS_REVIEW: DECISIONS.NEEDS_REVIEW };
+    return {
+      decision: decisionMap[profitAnalysis.decision.decision] ?? DECISIONS.NEEDS_REVIEW,
+      reason: profitAnalysis.decision.reasons?.join(' ') ?? 'Profit Analyzer decision available',
+      triggeredRule: 'profit_analyzer_v1',
+      confidence: Number(profitAnalysis.decision.confidence ?? config.confidence.needsReview),
+      metrics: profitAnalysis.profitability ?? null
+    };
+  }
   const amazonConfidence = discoveryConfidence(discovery);
   if (amazonConfidence < Number(config.rules.amazonMinimumMatchConfidence)) {
     return { decision: DECISIONS.NEEDS_REVIEW, reason: `Amazon match confidence ${amazonConfidence} is below required ${config.rules.amazonMinimumMatchConfidence}`, triggeredRule: 'amazon_match_confidence', confidence: Number(config.confidence.needsReview) };
@@ -144,24 +171,27 @@ export function decideProduct(product, { discovery, revsellerData, config }) {
   return { decision: DECISIONS.BUY, reason: 'All configured decision thresholds passed', triggeredRule: 'all_thresholds_passed', confidence: Number(config.confidence.buy), metrics };
 }
 
-export async function runDecisionEngine({ configPath = defaultConfigPath, mainBuyingEnginePath = defaultMainBuyingEnginePath, amazonDiscoveryPath = defaultAmazonDiscoveryPath, revsellerAnalysisPath = defaultRevsellerAnalysisPath, outputPath = defaultDecisionReportPath } = {}) {
+export async function runDecisionEngine({ configPath = defaultConfigPath, mainBuyingEnginePath = defaultMainBuyingEnginePath, amazonDiscoveryPath = defaultAmazonDiscoveryPath, profitAnalysisPath = defaultProfitAnalysisPath, revsellerAnalysisPath = defaultRevsellerAnalysisPath, outputPath = defaultDecisionReportPath } = {}) {
   const config = await loadDecisionConfig(configPath);
   const products = existsSync(mainBuyingEnginePath) ? await readJson(mainBuyingEnginePath) : [];
   const amazonDiscovery = existsSync(amazonDiscoveryPath) ? await readJson(amazonDiscoveryPath) : { discoveries: [] };
+  const profitAnalysis = existsSync(profitAnalysisPath) ? await readJson(profitAnalysisPath) : null;
   const revsellerAnalysis = existsSync(revsellerAnalysisPath) ? await readJson(revsellerAnalysisPath) : null;
+  const profitIndex = buildProfitIndex(profitAnalysis);
   const discoveryIndex = buildDiscoveryIndex(amazonDiscovery);
   const revsellerIndex = buildRevsellerIndex(revsellerAnalysis);
   const decisions = products.map((product) => {
     const discovery = findByProduct(discoveryIndex, product);
     const amazon = amazonProductFromDiscovery(discovery);
-    const revsellerData = findByProduct(revsellerIndex, product, { asin: amazon.asin ?? product.amazonAsin });
-    return { product, amazonDiscovery: discovery ?? null, revsellerData, ...decideProduct(product, { discovery, revsellerData, config }) };
+    const profitAnalysis = findByProduct(profitIndex, product, { asin: amazon.asin ?? product.amazonAsin });
+    const revsellerData = profitAnalysis ? null : findByProduct(revsellerIndex, product, { asin: amazon.asin ?? product.amazonAsin });
+    return { product, amazonDiscovery: discovery ?? null, profitAnalysis, revsellerData, ...decideProduct(product, { discovery, profitAnalysis, revsellerData, config }) };
   });
   const report = {
     engine: config.engineName,
     generatedAt: new Date().toISOString(),
     configPath: path.relative(repositoryRoot, configPath),
-    inputs: { mainBuyingEngine: path.relative(repositoryRoot, mainBuyingEnginePath), amazonProductDiscovery: path.relative(repositoryRoot, amazonDiscoveryPath), revsellerAnalysis: path.relative(repositoryRoot, revsellerAnalysisPath) },
+    inputs: { mainBuyingEngine: path.relative(repositoryRoot, mainBuyingEnginePath), amazonProductDiscovery: path.relative(repositoryRoot, amazonDiscoveryPath), profitAnalysis: path.relative(repositoryRoot, profitAnalysisPath), revsellerAnalysis: path.relative(repositoryRoot, revsellerAnalysisPath) },
     totals: { products: decisions.length, buy: decisions.filter((entry) => entry.decision === DECISIONS.BUY).length, dontBuy: decisions.filter((entry) => entry.decision === DECISIONS.DONT_BUY).length, needsReview: decisions.filter((entry) => entry.decision === DECISIONS.NEEDS_REVIEW).length },
     firstDecision: decisions[0] ?? null,
     decisions
