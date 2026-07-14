@@ -15,8 +15,8 @@ const maxListingScreenshots = Number(process.env.BJS_DEALS_MAX_LISTING_SCREENSHO
 const productPageConcurrency = Number(process.env.BJS_PRODUCT_PAGE_CONCURRENCY ?? 1);
 const storeConcurrency = Number(process.env.BJS_STORE_CONCURRENCY ?? 3);
 const dealSources = [
-  { name: 'Clearance', searchTerm: 'clearance', maxTiles: Number(process.env.BJS_MAX_CLEARANCE_TILES ?? Infinity), maxProducts: Number(process.env.BJS_MAX_CLEARANCE_PRODUCTS ?? process.env.BJS_MAX_RELEVANT_PRODUCT_PAGES ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 12) },
-  { name: 'Wow Deals', searchTerm: 'wow deals', maxTiles: Number(process.env.BJS_MAX_WOW_DEALS_TILES ?? Infinity), maxProducts: Number(process.env.BJS_MAX_WOW_DEALS_PRODUCTS ?? process.env.BJS_MAX_RELEVANT_PRODUCT_PAGES ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 12) }
+  { name: 'Clearance', searchTerm: 'clearance', maxTilesToInspect: Number(process.env.BJS_MAX_CLEARANCE_TILES_TO_INSPECT ?? process.env.BJS_MAX_CLEARANCE_TILES ?? Infinity), maxProductPages: Number(process.env.BJS_MAX_CLEARANCE_PRODUCT_PAGES ?? process.env.BJS_MAX_CLEARANCE_PRODUCTS ?? process.env.BJS_MAX_RELEVANT_PRODUCT_PAGES ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 12) },
+  { name: 'Wow Deals', searchTerm: 'wow deals', maxTilesToInspect: Number(process.env.BJS_MAX_WOW_DEALS_TILES_TO_INSPECT ?? process.env.BJS_MAX_WOW_DEALS_TILES ?? Infinity), maxProductPages: Number(process.env.BJS_MAX_WOW_DEALS_PRODUCT_PAGES ?? process.env.BJS_MAX_WOW_DEALS_PRODUCTS ?? process.env.BJS_MAX_RELEVANT_PRODUCT_PAGES ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 12) }
 ];
 const relevantCategoryPatterns = [/grocery/i, /snacks?/i, /candy/i, /cookies?/i, /crackers?/i, /nuts?/i, /beverages?/i, /energy products?/i, /shelf-stable food/i, /health\s*&\s*beauty/i, /health\s*&\s*household/i, /personal care/i, /household consumables?/i];
 const unrelatedDepartmentPattern = /furniture|patio|garden|outdoor|appliance|electronics?|toys?|clothing|apparel|automotive|seasonal|lawn|grill|sporting goods|jewelry|office|books?|mattress|tires?/i;
@@ -378,10 +378,10 @@ async function extractListingProducts(page, dealSource) {
       seen.add(productUrl);
       const text = clean(card.textContent) || '';
       const category = categoryFrom(card);
-      if (category && (unrelatedDepartmentPattern.test(category) || !relevantCategoryPatterns.some((pattern) => pattern.test(category)))) return null;
       const prices = priceMatches(text);
       const image = card.querySelector('img');
-      const productName = clean(card.querySelector('[data-testid*="name" i], [class*="name" i], h2, h3, a[href*="/product"], a[href*="/p/"]')?.textContent) || clean(image?.getAttribute('alt'));
+      const imageAltText = clean(image?.getAttribute('alt'));
+      const productName = clean(card.querySelector('[data-testid*="name" i], [class*="name" i], h2, h3, a[href*="/product"], a[href*="/p/"]')?.textContent) || imageAltText;
       return {
         supplier: "BJ's Wholesale Club",
         dealSource: dealSourceName,
@@ -397,6 +397,8 @@ async function extractListingProducts(page, dealSource) {
         coupon: clean(text.match(/(?:coupon|clip|instant savings|save \$?\d+)[^.]{0,120}/i)?.[0]),
         availability: clean(text.match(/(?:in stock|out of stock|available|pickup|delivery|shipping|same-day delivery)[^.]{0,80}/i)?.[0]),
         listingText: text,
+        imageAltText,
+        categoryText: category,
         quantityLimit: clean(text.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]),
         productUrl,
         imageUrl: absUrl(image?.currentSrc || image?.getAttribute('src')),
@@ -488,7 +490,7 @@ test.describe("BJ's store shopping list intelligence", () => {
       }
 
       const allListingProducts = await extractListingProducts(page, dealSource);
-      const listingProducts = allListingProducts.slice(0, Number.isFinite(dealSource.maxTiles) ? dealSource.maxTiles : allListingProducts.length);
+      const listingProducts = allListingProducts.slice(0, Number.isFinite(dealSource.maxTilesToInspect) ? dealSource.maxTilesToInspect : allListingProducts.length);
       const prefilteredProducts = listingProducts.map((product) => ({ product, filter: evaluateListingProduct(product) }));
       const prefilteredRelevantProducts = prefilteredProducts.filter((entry) => entry.filter.accepted).map((entry) => entry.product);
       const resumedSkippedCount = prefilteredRelevantProducts.filter((product) => processedProductKeys.has(productIdentity(product))).length;
@@ -505,8 +507,8 @@ test.describe("BJ's store shopping list intelligence", () => {
       const counts = { attempted: 0, accepted: 0, rejected: 0, failed: 0 };
       const failures = [];
       for (const [index, product] of relevantListingProducts.entries()) {
-        if (sourceProducts.length >= dealSource.maxProducts) break;
-        if (!listingProductAllowed(product)) { counts.rejected += 1; continue; }
+        if (counts.attempted >= dealSource.maxProductPages) break;
+        if (!listingProductAllowed(product)) continue;
         counts.attempted += 1;
         try {
           const enrichedProduct = await enrichProductFromPage(page, product, index);
@@ -535,12 +537,12 @@ test.describe("BJ's store shopping list intelligence", () => {
         dealSource: dealSource.name,
         discoveredUrl,
         productCount: sourceProducts.length,
-        scrapedProductLimit: dealSource.maxProducts,
+        productPageLimit: dealSource.maxProductPages,
         tileCount: listingProducts.length,
         rejectedBeforeProductPage,
         productPagesOpened: counts.attempted,
         resumedSkippedCount,
-        skippedByLimitCount: Math.max(relevantListingProducts.length - counts.attempted, 0),
+        skippedByProductPageLimitCount: Math.max(relevantListingProducts.length - counts.attempted, 0),
         attemptedCount: counts.attempted,
         acceptedCount: counts.accepted,
         rejectedCount: counts.rejected,
@@ -553,12 +555,13 @@ test.describe("BJ's store shopping list intelligence", () => {
     const finalProgress = await saveProgress(products, { lastStore: null, lastUrl: page.url(), storeConcurrency, productPageConcurrency });
     const totalRuntimeMs = Date.now() - runStartedAt;
     const scanSummary = {
-      tilesDetected: sourceReports.reduce((sum, report) => sum + report.tileCount, 0),
+      tilesInspected: sourceReports.reduce((sum, report) => sum + report.tileCount, 0),
       rejectedBeforeProductPage: sourceReports.reduce((sum, report) => sum + report.rejectedBeforeProductPage, 0),
       productPagesOpened: sourceReports.reduce((sum, report) => sum + report.productPagesOpened, 0),
       productsAccepted: runCounts.accepted,
+      rejectedAfterProductPage: runCounts.rejected,
       duplicatesMerged: finalProgress.duplicatesMerged,
-      errors: runCounts.failed,
+      failed: runCounts.failed,
       totalRuntimeMs,
       totalRuntime: `${Math.floor(totalRuntimeMs / 60000)}m ${Math.round((totalRuntimeMs % 60000) / 1000)}s`,
       averageRuntimePerStoreMs: totalRuntimeMs,
@@ -567,12 +570,13 @@ test.describe("BJ's store shopping list intelligence", () => {
       completedAt: new Date().toISOString()
     };
     await writeFile(scanSummaryPath, JSON.stringify(scanSummary, null, 2));
-    console.log(`Clearance/Wow tiles detected: ${scanSummary.tilesDetected}`);
+    console.log(`Tiles inspected: ${scanSummary.tilesInspected}`);
     console.log(`Rejected before product page: ${scanSummary.rejectedBeforeProductPage}`);
     console.log(`Product pages opened: ${scanSummary.productPagesOpened}`);
-    console.log(`Products accepted: ${scanSummary.productsAccepted}`);
+    console.log(`Accepted: ${scanSummary.productsAccepted}`);
+    console.log(`Rejected after product page: ${runCounts.rejected}`);
     console.log(`Duplicates merged: ${scanSummary.duplicatesMerged}`);
-    console.log(`Errors: ${scanSummary.errors}`);
+    console.log(`Failed: ${scanSummary.failed}`);
     console.log(`Total runtime: ${scanSummary.totalRuntime}`);
     await writeFile(path.join(logDir, 'deal-execution-report.json'), JSON.stringify({
       auth,
@@ -582,7 +586,8 @@ test.describe("BJ's store shopping list intelligence", () => {
       acceptedCount: runCounts.accepted,
       rejectedCount: runCounts.rejected,
       failedCount: runCounts.failed,
-      productLimits: Object.fromEntries(dealSources.map((source) => [source.name, source.maxProducts])),
+      productPageLimits: Object.fromEntries(dealSources.map((source) => [source.name, source.maxProductPages])),
+      tileInspectionLimits: Object.fromEntries(dealSources.map((source) => [source.name, source.maxTilesToInspect])),
       outputs: {
         dealProducts: dealProductsPath,
         shoppingListReport: shoppingListReportPath,
