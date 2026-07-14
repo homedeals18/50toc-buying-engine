@@ -19,6 +19,8 @@ export function listingFilterText(product = {}) {
     product.productName,
     product.category,
     product.listingText,
+    product.imageAltText,
+    product.categoryText,
     product.productUrl
   ].map(compact).filter(Boolean).join(' | ');
 }

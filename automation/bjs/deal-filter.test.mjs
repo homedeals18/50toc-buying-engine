@@ -8,13 +8,17 @@ test('rejects unrelated departments before product page', () => {
   }
 });
 
-test('rejects variety and mixed flavor but not plain pack', () => {
+test('rejects variety assorted mixed flavor and sampler products before product page', () => {
+  assert.equal(evaluateListingProduct({ productName: 'Mixed Flavor Chips' }).accepted, false);
+  assert.equal(evaluateListingProduct({ productName: 'Variety Pack' }).accepted, false);
+  assert.equal(evaluateListingProduct({ productName: 'Assorted Candy' }).accepted, false);
+  assert.equal(evaluateListingProduct({ productName: 'Cookie Sampler' }).accepted, false);
   assert.equal(evaluateListingProduct({ productName: 'Snack Variety Pack' }).accepted, false);
-  assert.equal(evaluateListingProduct({ productName: 'Mixed Flavor Protein Bars' }).accepted, false);
-  assert.equal(evaluateListingProduct({ productName: 'Blue Diamond Almonds 24 Pack', category: 'Grocery' }).accepted, true);
 });
 
-test('does not reject peanut butter', () => {
+test('accepts normal pack and peanut butter products', () => {
+  assert.equal(evaluateListingProduct({ productName: 'Peanut Butter Crackers', category: 'Grocery' }).accepted, true);
+  assert.equal(evaluateListingProduct({ productName: 'Blue Diamond Almonds 24 Pack', category: 'Grocery' }).accepted, true);
   assert.equal(evaluateListingProduct({ productName: 'Skippy Peanut Butter 2 Pack', category: 'Grocery' }).accepted, true);
 });
 
