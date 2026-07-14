@@ -1,6 +1,6 @@
 const wantedCategoryPattern = /grocery|snacks?|candy|cookies?|crackers?|nuts?|beverages?|energy products?|shelf-stable food|health\s*&\s*beauty|health\s*&\s*household|personal care|household consumables?/i;
 
-const rejectedDepartmentPattern = /\b(appliances?|kitchen[\s_-]+appliances?|home[\s_-]+appliances?|cookers?|slow[\s_-]+cookers?|multi[\s_-]+cookers?|blenders?|microwaves?|air[\s_-]+fryers?|toasters?|vacuums?|fans?|heaters?|refrigerators?|freezers?|washers?|dryers?|coffee[\s_-]+makers?|mattress(?:es)?|sofas?|sectionals?|recliners?|chairs?|furniture|batter(?:y|ies)|electronics?|t\.?v\.?s?|televisions?|soundbars?|audio|patio|garden|outdoor[\s_-]+furniture|outdoor|gazebos?|pergolas?|grills?|lawn[\s_-]+equipment|lawn|power[\s_-]+equipment|toys?|clothing|apparel|automotive|seasonal[\s_-]+decorations?|seasonal|home[\s_-]+decor|jewelry|office[\s_-]+furniture|office|sporting[\s_-]+goods|books?|tires?)\b/i;
+const rejectedDepartmentPattern = /\b(appliances?|kitchen[\s_-]+appliances?|home[\s_-]+appliances?|cookers?|slow[\s_-]+cookers?|multi[\s_-]+cookers?|blenders?|microwaves?|air[\s_-]+fryers?|toasters?|vacuums?|fans?|heaters?|refrigerators?|fridges?|mini[\s_-]+fridges?|freezers?|washers?|dryers?|coffee[\s_-]+makers?|mattress(?:es)?|sofas?|sectionals?|recliners?|chairs?|furniture|batter(?:y|ies)|electronics?|airpods|headphones?|nintendo|video[\s_-]+games?|consoles?|gaming|t\.?v\.?s?|televisions?|soundbars?|audio|patio[\s_-]+dining|patio|garden|outdoor[\s_-]+play|outdoor[\s_-]+furniture|outdoor|gazebos?|pergolas?|grill[\s_-]+accessor(?:y|ies)|grills?|spatulas?|deck[\s_-]+tiles?|dining[\s_-]+sets?|seating[\s_-]+sets?|lawn[\s_-]+games?|lawn[\s_-]+equipment|lawn|badminton|volleyball|power[\s_-]+equipment|toys?|clothing|apparel|automotive|seasonal[\s_-]+decorations?|seasonal|home[\s_-]+decor|jewelry|office[\s_-]+furniture|office|sporting[\s_-]+goods|books?|tires?)\b/i;
 
 const rejectedVarietyPattern = /\b(variety(?:\s+pack)?|assorted|assortment|mixed\s+(?:pack|variety|flavo[u]?r)|multi\s+flavo[u]?r|flavo[u]?r\s+variety|sampler)\b/i;
 
@@ -75,12 +75,25 @@ export function categoryAllowed(product = {}) {
   return wantedCategoryPattern.test(category) && !rejectedDepartmentPattern.test(category) && !frozenChilledPattern.test(category);
 }
 
+export function normalizeProductUrl(value) {
+  const raw = compact(value);
+  if (!raw) return '';
+  try {
+    const url = new URL(raw, 'https://www.bjs.com');
+    url.hash = '';
+    url.search = '';
+    return `${url.origin}${url.pathname.replace(/\/+$/, '')}`.toLowerCase();
+  } catch {
+    return raw.split(/[?#]/)[0].replace(/\/+$/, '').toLowerCase();
+  }
+}
+
 export function productIdentity(product = {}) {
   const upc = compact(product.upc);
   if (upc) return `upc:${upc}`;
   const sku = compact(product.sku);
   if (sku) return `sku:${sku}`;
-  const url = compact(product.productUrl)?.split('?')[0];
+  const url = normalizeProductUrl(product.productUrl);
   if (url) return `url:${url}`;
   return `name-size:${normalizeProductKeyText(product.productName)}:${normalizeProductKeyText(product.packageSize)}`;
 }
