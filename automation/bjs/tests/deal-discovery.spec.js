@@ -1,7 +1,8 @@
 import { chromium, test as base } from '@playwright/test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { runBuyingPipeline, writeCombinedShoppingListReport } from '../../shared/buying-engine.js';
+import { categoryAllowed, evaluateListingProduct, listingProductAllowed, mergeDuplicateProducts, productIdentity } from '../deal-filter.js';
 
 const artifactRoot = path.resolve(process.cwd(), '../../artifacts/bjs');
 const screenshotDir = path.join(artifactRoot, 'screenshots');
@@ -11,14 +12,18 @@ const manualChromeEndpoint = process.env.BJS_CHROME_CDP_ENDPOINT ?? 'http://127.
 const browserMode = process.env.BJS_BROWSER_MODE ?? 'playwright';
 const manualLoginTimeout = Number(process.env.BJS_MANUAL_LOGIN_TIMEOUT_MS ?? 10 * 60_000);
 const maxListingScreenshots = Number(process.env.BJS_DEALS_MAX_LISTING_SCREENSHOTS ?? 2);
+const productPageConcurrency = Number(process.env.BJS_PRODUCT_PAGE_CONCURRENCY ?? 1);
+const storeConcurrency = Number(process.env.BJS_STORE_CONCURRENCY ?? 3);
 const dealSources = [
-  { name: 'Clearance', searchTerm: 'clearance', maxProducts: Number(process.env.BJS_MAX_CLEARANCE_PRODUCTS ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 12) },
-  { name: 'Wow Deals', searchTerm: 'wow deals', maxProducts: Number(process.env.BJS_MAX_WOW_DEALS_PRODUCTS ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 12) }
+  { name: 'Clearance', searchTerm: 'clearance', maxTiles: Number(process.env.BJS_MAX_CLEARANCE_TILES ?? Infinity), maxProducts: Number(process.env.BJS_MAX_CLEARANCE_PRODUCTS ?? process.env.BJS_MAX_RELEVANT_PRODUCT_PAGES ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 12) },
+  { name: 'Wow Deals', searchTerm: 'wow deals', maxTiles: Number(process.env.BJS_MAX_WOW_DEALS_TILES ?? Infinity), maxProducts: Number(process.env.BJS_MAX_WOW_DEALS_PRODUCTS ?? process.env.BJS_MAX_RELEVANT_PRODUCT_PAGES ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 12) }
 ];
-const relevantCategoryPatterns = [/grocery/i, /health\s*&\s*beauty/i, /health\s*&\s*household/i];
+const relevantCategoryPatterns = [/grocery/i, /snacks?/i, /candy/i, /cookies?/i, /crackers?/i, /nuts?/i, /beverages?/i, /energy products?/i, /shelf-stable food/i, /health\s*&\s*beauty/i, /health\s*&\s*household/i, /personal care/i, /household consumables?/i];
 const unrelatedDepartmentPattern = /furniture|patio|garden|outdoor|appliance|electronics?|toys?|clothing|apparel|automotive|seasonal|lawn|grill|sporting goods|jewelry|office|books?|mattress|tires?/i;
 const dealProductsPath = path.join(logDir, 'deal-products.json');
 const shoppingListReportPath = path.join(logDir, 'shopping-list-report.json');
+const scanSummaryPath = path.join(logDir, 'scan-summary.json');
+const scanProgressPath = path.join(logDir, 'scan-progress.json');
 
 async function ensureArtifactDirs() {
   await Promise.all([
@@ -282,13 +287,6 @@ async function navigateToDealSource(page, dealSource) {
   return page.url();
 }
 
-function categoryAllowed(product) {
-  const category = product.category;
-  if (!category) return true;
-  return relevantCategoryPatterns.some((pattern) => pattern.test(category)) && !unrelatedDepartmentPattern.test(category);
-}
-
-
 function unifiedDeal(product) {
   const scanDate = product.scanDate ?? new Date().toISOString();
   return {
@@ -312,12 +310,24 @@ function unifiedDeal(product) {
   };
 }
 
-async function saveProgress(products) {
+async function loadScanProgress() {
+  try {
+    return JSON.parse(await readFile(scanProgressPath, 'utf8'));
+  } catch {
+    return { processedProductKeys: [] };
+  }
+}
+
+async function saveProgress(products, progress = {}) {
   await ensureArtifactDirs();
   const unifiedProducts = products.map(unifiedDeal).filter(categoryAllowed);
-  const evaluatedProducts = await runBuyingPipeline(unifiedProducts);
+  const deduped = mergeDuplicateProducts(unifiedProducts);
+  const evaluatedProducts = await runBuyingPipeline(deduped.products);
   await writeFile(dealProductsPath, JSON.stringify(evaluatedProducts, null, 2));
   await writeCombinedShoppingListReport("BJ's Wholesale Club", evaluatedProducts, shoppingListReportPath);
+  const processedProductKeys = [...new Set([...(progress.processedProductKeys ?? []), ...deduped.products.map(productIdentity)])];
+  await writeFile(scanProgressPath, JSON.stringify({ ...progress, processedProductKeys, productsSaved: evaluatedProducts.length, duplicatesMerged: deduped.duplicatesMerged, updatedAt: new Date().toISOString() }, null, 2));
+  return { evaluatedProducts, duplicatesMerged: deduped.duplicatesMerged };
 }
 
 async function extractListingProducts(page, dealSource) {
@@ -386,6 +396,7 @@ async function extractListingProducts(page, dealSource) {
         discount: clean(text.match(/(?:save\s*\$?\d+(?:\.\d{2})?|\d+%\s*off|clearance|wow deal)/i)?.[0]),
         coupon: clean(text.match(/(?:coupon|clip|instant savings|save \$?\d+)[^.]{0,120}/i)?.[0]),
         availability: clean(text.match(/(?:in stock|out of stock|available|pickup|delivery|shipping|same-day delivery)[^.]{0,80}/i)?.[0]),
+        listingText: text,
         quantityLimit: clean(text.match(/(?:limit|maximum|max)\s*(?:of)?\s*\d+[^.]{0,80}/i)?.[0]),
         productUrl,
         imageUrl: absUrl(image?.currentSrc || image?.getAttribute('src')),
@@ -459,7 +470,10 @@ test.describe("BJ's store shopping list intelligence", () => {
     page.on('console', (message) => consoleMessages.push({ type: message.type(), text: message.text() }));
     page.on('pageerror', (error) => consoleMessages.push({ type: 'pageerror', text: error.message }));
 
+    const runStartedAt = Date.now();
     const auth = await ensureAuthenticated(page);
+    const existingProgress = await loadScanProgress();
+    const processedProductKeys = new Set(existingProgress.processedProductKeys ?? []);
     const sourceReports = [];
     const products = [];
     const runCounts = { attempted: 0, accepted: 0, rejected: 0, failed: 0 };
@@ -473,9 +487,15 @@ test.describe("BJ's store shopping list intelligence", () => {
         await page.waitForTimeout(750);
       }
 
-      const listingProducts = await extractListingProducts(page, dealSource);
+      const allListingProducts = await extractListingProducts(page, dealSource);
+      const listingProducts = allListingProducts.slice(0, Number.isFinite(dealSource.maxTiles) ? dealSource.maxTiles : allListingProducts.length);
+      const prefilteredProducts = listingProducts.map((product) => ({ product, filter: evaluateListingProduct(product) }));
+      const prefilteredRelevantProducts = prefilteredProducts.filter((entry) => entry.filter.accepted).map((entry) => entry.product);
+      const resumedSkippedCount = prefilteredRelevantProducts.filter((product) => processedProductKeys.has(productIdentity(product))).length;
+      const relevantListingProducts = prefilteredRelevantProducts.filter((product) => !processedProductKeys.has(productIdentity(product)));
+      const rejectedBeforeProductPage = prefilteredProducts.length - prefilteredRelevantProducts.length;
       const expectedProducts = await expectedResultCount(page);
-      console.log(`BJ's ${dealSource.name}: detected ${listingProducts.length} product tiles before opening product pages${expectedProducts ? ` (page reports ${expectedProducts} Results)` : ''}.`);
+      console.log(`BJ's ${dealSource.name}: detected ${listingProducts.length} product tiles before opening product pages${expectedProducts ? ` (page reports ${expectedProducts} Results)` : ''}; rejected ${rejectedBeforeProductPage} before product page; ${relevantListingProducts.length} remain.`);
       if (listingProducts.length === 0) {
         const screenshotPath = await saveStep(page, `${dealSource.name}-page-no-scrapable-products`);
         throw new Error(`BJ's ${dealSource.name} navigation reached ${page.url()}, but no scrapable product tiles were found. Screenshot saved to ${screenshotPath}.`);
@@ -484,8 +504,9 @@ test.describe("BJ's store shopping list intelligence", () => {
       const sourceProducts = [];
       const counts = { attempted: 0, accepted: 0, rejected: 0, failed: 0 };
       const failures = [];
-      for (const [index, product] of listingProducts.entries()) {
+      for (const [index, product] of relevantListingProducts.entries()) {
         if (sourceProducts.length >= dealSource.maxProducts) break;
+        if (!listingProductAllowed(product)) { counts.rejected += 1; continue; }
         counts.attempted += 1;
         try {
           const enrichedProduct = await enrichProductFromPage(page, product, index);
@@ -493,7 +514,8 @@ test.describe("BJ's store shopping list intelligence", () => {
             sourceProducts.push(enrichedProduct);
             products.push(enrichedProduct);
             counts.accepted += 1;
-            await saveProgress(products);
+            processedProductKeys.add(productIdentity(enrichedProduct));
+            await saveProgress(products, { lastStore: null, lastUrl: enrichedProduct.productUrl, processedProductKeys: [...processedProductKeys], storeConcurrency, productPageConcurrency });
           } else {
             counts.rejected += 1;
             console.log(`BJ's ${dealSource.name}: skipped unrelated category "${enrichedProduct.category}" for ${enrichedProduct.productName ?? enrichedProduct.productUrl}.`);
@@ -514,7 +536,11 @@ test.describe("BJ's store shopping list intelligence", () => {
         discoveredUrl,
         productCount: sourceProducts.length,
         scrapedProductLimit: dealSource.maxProducts,
-        skippedByLimitCount: Math.max(listingProducts.length - counts.attempted, 0),
+        tileCount: listingProducts.length,
+        rejectedBeforeProductPage,
+        productPagesOpened: counts.attempted,
+        resumedSkippedCount,
+        skippedByLimitCount: Math.max(relevantListingProducts.length - counts.attempted, 0),
         attemptedCount: counts.attempted,
         acceptedCount: counts.accepted,
         rejectedCount: counts.rejected,
@@ -524,7 +550,30 @@ test.describe("BJ's store shopping list intelligence", () => {
       });
     }
 
-    await saveProgress(products);
+    const finalProgress = await saveProgress(products, { lastStore: null, lastUrl: page.url(), storeConcurrency, productPageConcurrency });
+    const totalRuntimeMs = Date.now() - runStartedAt;
+    const scanSummary = {
+      tilesDetected: sourceReports.reduce((sum, report) => sum + report.tileCount, 0),
+      rejectedBeforeProductPage: sourceReports.reduce((sum, report) => sum + report.rejectedBeforeProductPage, 0),
+      productPagesOpened: sourceReports.reduce((sum, report) => sum + report.productPagesOpened, 0),
+      productsAccepted: runCounts.accepted,
+      duplicatesMerged: finalProgress.duplicatesMerged,
+      errors: runCounts.failed,
+      totalRuntimeMs,
+      totalRuntime: `${Math.floor(totalRuntimeMs / 60000)}m ${Math.round((totalRuntimeMs % 60000) / 1000)}s`,
+      averageRuntimePerStoreMs: totalRuntimeMs,
+      storeConcurrency,
+      productPageConcurrency,
+      completedAt: new Date().toISOString()
+    };
+    await writeFile(scanSummaryPath, JSON.stringify(scanSummary, null, 2));
+    console.log(`Clearance/Wow tiles detected: ${scanSummary.tilesDetected}`);
+    console.log(`Rejected before product page: ${scanSummary.rejectedBeforeProductPage}`);
+    console.log(`Product pages opened: ${scanSummary.productPagesOpened}`);
+    console.log(`Products accepted: ${scanSummary.productsAccepted}`);
+    console.log(`Duplicates merged: ${scanSummary.duplicatesMerged}`);
+    console.log(`Errors: ${scanSummary.errors}`);
+    console.log(`Total runtime: ${scanSummary.totalRuntime}`);
     await writeFile(path.join(logDir, 'deal-execution-report.json'), JSON.stringify({
       auth,
       sourceReports,
@@ -536,7 +585,9 @@ test.describe("BJ's store shopping list intelligence", () => {
       productLimits: Object.fromEntries(dealSources.map((source) => [source.name, source.maxProducts])),
       outputs: {
         dealProducts: dealProductsPath,
-        shoppingListReport: shoppingListReportPath
+        shoppingListReport: shoppingListReportPath,
+        scanSummary: scanSummaryPath,
+        scanProgress: scanProgressPath
       },
       businessRules: {
         storeShoppingListOnly: true,
