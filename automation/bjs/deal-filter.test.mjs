@@ -8,6 +8,34 @@ test('rejects unrelated departments before product page', () => {
   }
 });
 
+
+test('rejects requested appliances furniture batteries and electronics keywords before product page', () => {
+  const keywords = [
+    'appliance', 'appliances', 'kitchen appliance', 'home appliance', 'cooker', 'slow cooker', 'multi cooker',
+    'blender', 'microwave', 'air fryer', 'toaster', 'vacuum', 'fan', 'heater', 'refrigerator', 'freezer',
+    'washer', 'dryer', 'coffee maker', 'mattress', 'sofa', 'sectional', 'recliner', 'chair', 'furniture',
+    'battery', 'batteries', 'electronics', 'TV', 'television', 'soundbar', 'audio'
+  ];
+  for (const keyword of keywords) {
+    const result = evaluateListingProduct({ productName: `Brand ${keyword} Deal` });
+    assert.equal(result.accepted, false, keyword);
+    assert.equal(result.signal, 'product name', keyword);
+  }
+});
+
+test('reports exact listing signal and matched text for prefilter rejections', () => {
+  assert.deepEqual(
+    evaluateListingProduct({ productName: 'Safe Snack', listingText: 'Energizer MAX AA Batteries 48 ct' }),
+    { accepted: false, reason: 'rejected-unrelated-department', matched: 'Batteries', signal: 'tile text' }
+  );
+  assert.equal(evaluateListingProduct({ productName: 'Safe Snack', productUrl: 'https://www.bjs.com/product/kitchen-appliance-deal/1' }).signal, 'product URL');
+  assert.equal(evaluateListingProduct({ productName: 'Safe Snack', imageAltText: 'Compact microwave' }).signal, 'image alt text');
+  assert.equal(evaluateListingProduct({ productName: 'Safe Snack', categoryText: 'TVs and Electronics' }).signal, 'category text');
+  assert.equal(evaluateListingProduct({ productName: 'Safe Snack', ariaLabels: 'Open product details for sectional sofa' }).signal, 'aria labels');
+  assert.equal(evaluateListingProduct({ productName: 'Safe Snack', breadcrumbText: 'Home / Furniture / Recliners' }).signal, 'breadcrumb/category metadata');
+  assert.equal(evaluateListingProduct({ productName: 'Safe Snack', categoryMetadata: 'home appliance' }).signal, 'breadcrumb/category metadata');
+});
+
 test('rejects variety assorted mixed flavor and sampler products before product page', () => {
   assert.equal(evaluateListingProduct({ productName: 'Mixed Flavor Chips' }).accepted, false);
   assert.equal(evaluateListingProduct({ productName: 'Variety Pack' }).accepted, false);
