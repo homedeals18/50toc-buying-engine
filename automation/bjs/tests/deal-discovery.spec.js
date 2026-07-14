@@ -2,7 +2,7 @@ import { chromium, test as base } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { runBuyingPipeline, writeCombinedShoppingListReport } from '../../shared/buying-engine.js';
-import { categoryAllowed, evaluateListingProduct, listingProductAllowed, mergeDuplicateProducts, productIdentity } from '../deal-filter.js';
+import { categoryAllowed, evaluateListingProduct, listingProductAllowed, mergeDuplicateProducts, normalizeProductUrl, productIdentity } from '../deal-filter.js';
 
 const artifactRoot = path.resolve(process.cwd(), '../../artifacts/bjs');
 const screenshotDir = path.join(artifactRoot, 'screenshots');
@@ -13,13 +13,16 @@ const browserMode = process.env.BJS_BROWSER_MODE ?? 'playwright';
 const manualLoginTimeout = Number(process.env.BJS_MANUAL_LOGIN_TIMEOUT_MS ?? 10 * 60_000);
 const maxListingScreenshots = Number(process.env.BJS_DEALS_MAX_LISTING_SCREENSHOTS ?? 2);
 const productPageConcurrency = Number(process.env.BJS_PRODUCT_PAGE_CONCURRENCY ?? 1);
+const blockedResourcePattern = /doubleclick|google-analytics|googletagmanager|facebook|hotjar|optimizely|segment|adsystem|adservice|analytics|tracker|tracking/i;
 const storeConcurrency = Number(process.env.BJS_STORE_CONCURRENCY ?? 3);
+const productPageLimitPerSource = (value) => Math.min(Number(value ?? 2), 2);
+const tileLimitPerSource = (value) => Math.min(Number(value ?? 20), 20);
 const dealSources = [
-  { name: 'Clearance', searchTerm: 'clearance', maxTilesToInspect: Number(process.env.BJS_MAX_CLEARANCE_TILES_TO_INSPECT ?? process.env.BJS_MAX_CLEARANCE_TILES ?? 20), maxProductPages: Number(process.env.BJS_MAX_CLEARANCE_PRODUCT_PAGES ?? process.env.BJS_MAX_CLEARANCE_PRODUCTS ?? process.env.BJS_MAX_RELEVANT_PRODUCT_PAGES ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 5) },
-  { name: 'Wow Deals', searchTerm: 'wow deals', maxTilesToInspect: Number(process.env.BJS_MAX_WOW_DEALS_TILES_TO_INSPECT ?? process.env.BJS_MAX_WOW_DEALS_TILES ?? 20), maxProductPages: Number(process.env.BJS_MAX_WOW_DEALS_PRODUCT_PAGES ?? process.env.BJS_MAX_WOW_DEALS_PRODUCTS ?? process.env.BJS_MAX_RELEVANT_PRODUCT_PAGES ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES ?? 5) }
+  { name: 'Clearance', searchTerm: 'clearance', maxTilesToInspect: tileLimitPerSource(process.env.BJS_MAX_CLEARANCE_TILES_TO_INSPECT ?? process.env.BJS_MAX_CLEARANCE_TILES), maxProductPages: productPageLimitPerSource(process.env.BJS_MAX_CLEARANCE_PRODUCT_PAGES ?? process.env.BJS_MAX_CLEARANCE_PRODUCTS ?? process.env.BJS_MAX_RELEVANT_PRODUCT_PAGES ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES) },
+  { name: 'Wow Deals', searchTerm: 'wow deals', maxTilesToInspect: tileLimitPerSource(process.env.BJS_MAX_WOW_DEALS_TILES_TO_INSPECT ?? process.env.BJS_MAX_WOW_DEALS_TILES), maxProductPages: productPageLimitPerSource(process.env.BJS_MAX_WOW_DEALS_PRODUCT_PAGES ?? process.env.BJS_MAX_WOW_DEALS_PRODUCTS ?? process.env.BJS_MAX_RELEVANT_PRODUCT_PAGES ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES) }
 ];
 const relevantCategoryPatterns = [/grocery/i, /snacks?/i, /candy/i, /cookies?/i, /crackers?/i, /nuts?/i, /beverages?/i, /energy products?/i, /shelf-stable food/i, /health\s*&\s*beauty/i, /health\s*&\s*household/i, /personal care/i, /household consumables?/i];
-const unrelatedDepartmentPattern = /\b(appliances?|kitchen[\s_-]+appliances?|home[\s_-]+appliances?|cookers?|slow[\s_-]+cookers?|multi[\s_-]+cookers?|blenders?|microwaves?|air[\s_-]+fryers?|toasters?|vacuums?|fans?|heaters?|refrigerators?|freezers?|washers?|dryers?|coffee[\s_-]+makers?|mattress(?:es)?|sofas?|sectionals?|recliners?|chairs?|furniture|batter(?:y|ies)|electronics?|t\.?v\.?s?|televisions?|soundbars?|audio|patio|garden|outdoor[\s_-]+furniture|outdoor|gazebos?|pergolas?|grills?|lawn[\s_-]+equipment|lawn|power[\s_-]+equipment|toys?|clothing|apparel|automotive|seasonal[\s_-]+decorations?|seasonal|home[\s_-]+decor|jewelry|office[\s_-]+furniture|office|sporting[\s_-]+goods|books?|tires?)\b/i;
+const unrelatedDepartmentPattern = /\b(appliances?|kitchen[\s_-]+appliances?|home[\s_-]+appliances?|cookers?|slow[\s_-]+cookers?|multi[\s_-]+cookers?|blenders?|microwaves?|air[\s_-]+fryers?|toasters?|vacuums?|fans?|heaters?|refrigerators?|fridges?|mini[\s_-]+fridges?|freezers?|washers?|dryers?|coffee[\s_-]+makers?|mattress(?:es)?|sofas?|sectionals?|recliners?|chairs?|furniture|batter(?:y|ies)|electronics?|airpods|headphones?|nintendo|video[\s_-]+games?|consoles?|gaming|t\.?v\.?s?|televisions?|soundbars?|audio|patio[\s_-]+dining|patio|garden|outdoor[\s_-]+play|outdoor[\s_-]+furniture|outdoor|gazebos?|pergolas?|grill[\s_-]+accessor(?:y|ies)|grills?|spatulas?|deck[\s_-]+tiles?|dining[\s_-]+sets?|seating[\s_-]+sets?|lawn[\s_-]+games?|lawn[\s_-]+equipment|lawn|badminton|volleyball|power[\s_-]+equipment|toys?|clothing|apparel|automotive|seasonal[\s_-]+decorations?|seasonal|home[\s_-]+decor|jewelry|office[\s_-]+furniture|office|sporting[\s_-]+goods|books?|tires?)\b/i;
 const dealProductsPath = path.join(logDir, 'deal-products.json');
 const shoppingListReportPath = path.join(logDir, 'shopping-list-report.json');
 const scanSummaryPath = path.join(logDir, 'scan-summary.json');
@@ -65,6 +68,7 @@ const test = base.extend({
         throw new Error(`Unable to connect to manual Chrome at ${manualChromeEndpoint}. Start regular Chrome with --remote-debugging-port=9222 and a dedicated profile folder before running this mode. Original error: ${error.message}`);
       }
       const context = browser.contexts()[0] ?? await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+      await installResourceBlocking(context);
       try {
         await use(context);
       } finally {
@@ -81,6 +85,7 @@ const test = base.extend({
       args: ['--disable-dev-shm-usage', '--no-sandbox']
     });
     try {
+      await installResourceBlocking(context);
       await use(context);
     } finally {
       await context.close();
@@ -91,6 +96,22 @@ const test = base.extend({
     await use(page);
   }
 });
+
+async function installResourceBlocking(context) {
+  await context.route('**/*', (route) => {
+    const request = route.request();
+    const type = request.resourceType();
+    const url = request.url();
+    if (['font', 'media'].includes(type) || blockedResourcePattern.test(url)) return route.abort().catch(() => undefined);
+    return route.continue().catch(() => undefined);
+  }).catch(() => undefined);
+}
+
+function msText(ms) { return `${(ms / 1000).toFixed(1)}s`; }
+
+function missingRequiredListingFields(product = {}) {
+  return ['productName', 'currentPrice', 'originalPrice', 'discount', 'productUrl', 'imageUrl', 'sku', 'availability'].filter((field) => !product[field]);
+}
 
 async function saveStep(page, name, details = {}) {
   await ensureArtifactDirs();
@@ -139,8 +160,8 @@ async function isAuthenticated(page) {
 }
 
 async function ensureAuthenticated(page) {
-  await gotoAndCheck(page, '/', { waitUntil: 'domcontentloaded', timeout: 60_000 }, 'homepage');
-  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+  await gotoAndCheck(page, '/', { waitUntil: 'domcontentloaded', timeout: 20_000 }, 'homepage');
+  await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => undefined);
   await clickCookieOrModalDismissers(page);
   await saveStep(page, '01-bjs-homepage-before-auth-check');
 
@@ -166,7 +187,7 @@ async function clickAndWaitForNavigation(page, locator, label) {
     page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => undefined),
     locator.click({ timeout: 10_000 })
   ]);
-  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+  await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => undefined);
   await failIfAccessDenied(page, label);
 }
 
@@ -206,8 +227,8 @@ async function loadMoreProductsIfAvailable(page) {
     const loadMore = page.locator('button:has-text("Load More"), a:has-text("Load More")').first();
     if (!(await loadMore.isVisible({ timeout: 1_000 }).catch(() => false))) break;
     await loadMore.click({ timeout: 5_000 }).catch(() => undefined);
-    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
-    await page.waitForTimeout(1_000);
+    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => undefined);
+    await page.waitForTimeout(500);
   }
 }
 
@@ -227,7 +248,7 @@ async function searchSiteForDealSource(page, dealSource) {
         page.waitForLoadState('domcontentloaded', { timeout: 30_000 }).catch(() => undefined),
         searchBox.press('Enter')
       ]);
-      await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+      await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => undefined);
       await failIfAccessDenied(page, `${dealSource.name}-search-results`);
       return true;
     }
@@ -236,8 +257,8 @@ async function searchSiteForDealSource(page, dealSource) {
 }
 
 async function navigateToDealSource(page, dealSource) {
-  await gotoAndCheck(page, '/', { waitUntil: 'domcontentloaded', timeout: 60_000 }, `${dealSource.name}-homepage`);
-  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+  await gotoAndCheck(page, '/', { waitUntil: 'domcontentloaded', timeout: 20_000 }, `${dealSource.name}-homepage`);
+  await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => undefined);
   await clickCookieOrModalDismissers(page);
 
   const linkPattern = new RegExp(dealSource.name.replace(/\s+/g, '\\s+'), 'i');
@@ -258,7 +279,7 @@ async function navigateToDealSource(page, dealSource) {
       const trigger = page.locator(selector).first();
       if (await trigger.isVisible({ timeout: 2_000 }).catch(() => false)) {
         await trigger.click({ timeout: 5_000 }).catch(() => undefined);
-        await page.waitForTimeout(1_000);
+        await page.waitForTimeout(500);
         const nestedDealLink = page.locator('a, button').filter({ hasText: linkPattern }).first();
         if (await nestedDealLink.isVisible({ timeout: 3_000 }).catch(() => false)) {
           await clickAndWaitForNavigation(page, nestedDealLink, `${dealSource.name}-menu-link`);
@@ -276,7 +297,7 @@ async function navigateToDealSource(page, dealSource) {
     }
   }
 
-  await page.waitForLoadState('networkidle', { timeout: 25_000 }).catch(() => undefined);
+  await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => undefined);
   await failIfAccessDenied(page, `${dealSource.name}-page`);
   const hasProductTiles = await page.locator(bjsProductLinkSelector).first().isVisible({ timeout: 10_000 }).catch(() => false);
   const screenshotPath = await saveStep(page, hasProductTiles ? `04-${dealSource.name}-page` : `04-${dealSource.name}-page-no-products`, { hasProductTiles });
@@ -333,9 +354,9 @@ async function saveProgress(products, progress = {}) {
 async function extractListingProducts(page, dealSource) {
   await loadMoreProductsIfAvailable(page);
   await page.mouse.wheel(0, 1800).catch(() => undefined);
-  await page.waitForTimeout(1_000);
+  await page.waitForTimeout(500);
   await page.mouse.wheel(0, 1800).catch(() => undefined);
-  await page.waitForTimeout(1_000);
+  await page.waitForTimeout(500);
 
   return page.evaluate(({ dealSourceName, productLinkSelector, relevantCategorySources, unrelatedDepartmentSource }) => {
     const relevantCategoryPatterns = relevantCategorySources.map((source) => new RegExp(source, 'i'));
@@ -344,13 +365,28 @@ async function extractListingProducts(page, dealSource) {
       if (!value) return null;
       try { return new URL(value, location.href).toString(); } catch { return null; }
     };
+    const normalizedUrl = (value) => {
+      const url = absUrl(value);
+      if (!url) return null;
+      try {
+        const parsed = new URL(url);
+        parsed.search = '';
+        parsed.hash = '';
+        return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`.toLowerCase();
+      } catch {
+        return url.split(/[?#]/)[0].replace(/\/+$/, '').toLowerCase();
+      }
+    };
     const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
     const priceMatches = (text) => [...text.matchAll(/\$\s*\d+(?:,\d{3})*(?:\.\d{2})?/g)].map((match) => match[0].replace(/\s+/g, ''));
     const findTile = (link) => {
+      const href = link.getAttribute('href');
       let node = link;
       for (let depth = 0; node && depth < 8; depth += 1, node = node.parentElement) {
         const text = node.textContent || '';
-        if (/\$|Pickup|Delivery|Shipping|clearance|wow|save|off|coupon|available|stock/i.test(text) && node.querySelector('img')) return node;
+        const productLinks = [...node.querySelectorAll('a[href*="/product/"]')].filter((candidate) => normalizedUrl(candidate.getAttribute('href')) === normalizedUrl(href));
+        const unrelatedControls = [...node.querySelectorAll('a, button')].some((candidate) => /^(view more|load more)$/i.test(clean(candidate.textContent) || ''));
+        if (productLinks.length > 0 && !unrelatedControls && /\$|Pickup|Delivery|Shipping|clearance|wow|save|off|coupon|available|stock/i.test(text) && node.querySelector('img')) return node;
       }
       return link.closest('[data-testid*="product" i], [class*="product-card" i], [class*="productTile" i], [class*="product-tile" i], li, article, div') || link;
     };
@@ -376,11 +412,15 @@ async function extractListingProducts(page, dealSource) {
       return relevantCategoryPatterns.some((pattern) => pattern.test(categoryText)) ? categoryText : null;
     };
     const productLinks = [...document.querySelectorAll(productLinkSelector)]
-      .filter((link) => link.offsetParent !== null && clean(link.textContent || link.getAttribute('aria-label') || link.querySelector('img')?.getAttribute('alt')));
+      .filter((link) => {
+        const url = normalizedUrl(link.getAttribute('href'));
+        const label = clean(link.textContent || link.getAttribute('aria-label') || link.querySelector('img')?.getAttribute('alt'));
+        return link.offsetParent !== null && url?.includes('/product/') && !/\/(?:category|search|cart|club|account)\b/i.test(url) && label && !/^(view more|load more|shop now|learn more)$/i.test(label);
+      });
 
     const seen = new Set();
     return productLinks.map((link) => {
-      const productUrl = absUrl(link?.getAttribute('href'));
+      const productUrl = normalizedUrl(link?.getAttribute('href'));
       const card = findTile(link);
       if (!productUrl || seen.has(productUrl)) return null;
       seen.add(productUrl);
@@ -401,14 +441,15 @@ async function extractListingProducts(page, dealSource) {
         card.closest('[data-department]')?.getAttribute('data-department'),
         pageCategoryMetadata
       ].filter(Boolean).join(' '));
-      const productName = clean(card.querySelector('[data-testid*="name" i], [class*="name" i], h2, h3, a[href*="/product"], a[href*="/p/"]')?.textContent) || imageAltText || ariaLabels;
+      const productName = clean(link.textContent) || clean(card.querySelector('[data-testid*="name" i], [class*="name" i], h2, h3')?.textContent) || imageAltText || ariaLabels;
+      const sku = clean(text.match(/(?:SKU|Item|Item #|Item Number|Item No\.?|Model)\s*[:#-]?\s*([A-Z0-9-]{3,})/i)?.[1]);
       return {
         supplier: "BJ's Wholesale Club",
         dealSource: dealSourceName,
         category,
         productName,
         brand: null,
-        sku: clean(text.match(/(?:SKU|Item|Item #|Model)\s*[:#-]?\s*([A-Z0-9-]{3,})/i)?.[1]),
+        sku,
         upc: null,
         packageSize: clean(text.match(/\b\d+(?:\.\d+)?\s*(?:oz|ounce|ounces|fl oz|ct|count|pack|pk|lb|lbs|gallon|gal|qt)\b(?:\s*[xX]\s*\d+)?/i)?.[0]),
         currentPrice: prices[0] ?? null,
@@ -437,10 +478,9 @@ async function extractListingProducts(page, dealSource) {
 }
 
 async function enrichProductFromPage(page, listingProduct, index) {
-  await gotoAndCheck(page, listingProduct.productUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 }, `${listingProduct.dealSource}-product-${index + 1}`);
-  await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
+  await gotoAndCheck(page, listingProduct.productUrl, { waitUntil: 'domcontentloaded', timeout: 20_000 }, `${listingProduct.dealSource}-product-${index + 1}`);
+  await page.locator('h1, [data-testid*="product-name" i], script[type="application/ld+json"]').first().waitFor({ state: 'attached', timeout: 6_000 }).catch(() => undefined);
   await failIfAccessDenied(page, `${listingProduct.dealSource}-product-${index + 1}`);
-  const screenshotPath = await saveStep(page, `05-${listingProduct.dealSource}-product-${String(index + 1).padStart(2, '0')}`);
 
   const details = await page.evaluate(() => {
     const clean = (value) => value?.replace(/\s+/g, ' ').trim() || null;
@@ -482,7 +522,7 @@ async function enrichProductFromPage(page, listingProduct, index) {
     };
   });
 
-  return unifiedDeal({ ...listingProduct, ...Object.fromEntries(Object.entries(details).filter(([, value]) => value)), screenshotPath });
+  return unifiedDeal({ ...listingProduct, ...Object.fromEntries(Object.entries(details).filter(([, value]) => value)) });
 }
 
 
@@ -502,9 +542,13 @@ test.describe("BJ's store shopping list intelligence", () => {
     const sourceReports = [];
     const products = [];
     const runCounts = { attempted: 0, accepted: 0, rejected: 0, failed: 0 };
+    const productPageTimings = [];
 
     for (const dealSource of dealSources) {
+      const navigationStartedAt = Date.now();
       const discoveredUrl = await navigateToDealSource(page, dealSource);
+      const listingNavigationMs = Date.now() - navigationStartedAt;
+      console.log(`BJ's ${dealSource.name}: listing navigation time ${msText(listingNavigationMs)}.`);
       const listingScreenshots = [];
       for (let i = 0; i < maxListingScreenshots; i += 1) {
         listingScreenshots.push(await saveStep(page, `04-${dealSource.name}-listing-page-${i + 1}`));
@@ -512,8 +556,19 @@ test.describe("BJ's store shopping list intelligence", () => {
         await page.waitForTimeout(750);
       }
 
+      const extractionStartedAt = Date.now();
       const allListingProducts = await extractListingProducts(page, dealSource);
-      const listingProducts = allListingProducts.slice(0, Number.isFinite(dealSource.maxTilesToInspect) ? dealSource.maxTilesToInspect : allListingProducts.length);
+      const listingExtractionMs = Date.now() - extractionStartedAt;
+      console.log(`BJ's ${dealSource.name}: listing extraction time ${msText(listingExtractionMs)}.`);
+      const dedupedByUrl = [];
+      const seenListingUrls = new Set();
+      for (const product of allListingProducts) {
+        const urlKey = normalizeProductUrl(product.productUrl);
+        if (!urlKey || seenListingUrls.has(urlKey)) continue;
+        seenListingUrls.add(urlKey);
+        dedupedByUrl.push({ ...product, productUrl: urlKey });
+      }
+      const listingProducts = dedupedByUrl.slice(0, Number.isFinite(dealSource.maxTilesToInspect) ? dealSource.maxTilesToInspect : dedupedByUrl.length);
       const prefilteredProducts = listingProducts.map((product) => ({ product, filter: evaluateListingProduct(product) }));
       for (const { product, filter } of prefilteredProducts.filter((entry) => !entry.filter.accepted)) {
         const productName = product.productName ?? product.imageAltText ?? product.ariaLabels ?? product.productUrl ?? 'Unknown product';
@@ -535,11 +590,19 @@ test.describe("BJ's store shopping list intelligence", () => {
       const counts = { attempted: 0, accepted: 0, rejected: 0, failed: 0 };
       const failures = [];
       for (const [index, product] of relevantListingProducts.entries()) {
-        if (counts.attempted >= dealSource.maxProductPages) break;
         if (!listingProductAllowed(product)) continue;
-        counts.attempted += 1;
+        let enrichedProduct = product;
         try {
-          const enrichedProduct = await enrichProductFromPage(page, product, index);
+          const missingFields = missingRequiredListingFields(product);
+          if (missingFields.length > 0) {
+            if (counts.attempted >= dealSource.maxProductPages) break;
+            counts.attempted += 1;
+            const productPageStartedAt = Date.now();
+            enrichedProduct = await enrichProductFromPage(page, product, index);
+            const durationMs = Date.now() - productPageStartedAt;
+            productPageTimings.push({ dealSource: dealSource.name, productUrl: product.productUrl, productName: product.productName, durationMs });
+            console.log(`BJ's ${dealSource.name}: product page ${counts.attempted}/${dealSource.maxProductPages} duration ${msText(durationMs)} for ${product.productName ?? product.productUrl}; filled missing listing fields: ${missingFields.join(', ')}.`);
+          }
           if (categoryAllowed(enrichedProduct)) {
             sourceProducts.push(enrichedProduct);
             products.push(enrichedProduct);
@@ -569,6 +632,9 @@ test.describe("BJ's store shopping list intelligence", () => {
         tileCount: listingProducts.length,
         rejectedBeforeProductPage,
         productPagesOpened: counts.attempted,
+        listingNavigationMs,
+        listingExtractionMs,
+        duplicateUrlCount: allListingProducts.length - dedupedByUrl.length,
         resumedSkippedCount,
         skippedByProductPageLimitCount: Math.max(relevantListingProducts.length - counts.attempted, 0),
         attemptedCount: counts.attempted,
@@ -582,6 +648,8 @@ test.describe("BJ's store shopping list intelligence", () => {
 
     const finalProgress = await saveProgress(products, { lastStore: null, lastUrl: page.url(), storeConcurrency, productPageConcurrency });
     const totalRuntimeMs = Date.now() - runStartedAt;
+    const slowestProductPage = productPageTimings.reduce((slowest, timing) => !slowest || timing.durationMs > slowest.durationMs ? timing : slowest, null);
+    const averageProductPageDurationMs = productPageTimings.length ? Math.round(productPageTimings.reduce((sum, timing) => sum + timing.durationMs, 0) / productPageTimings.length) : 0;
     const scanSummary = {
       tilesInspected: sourceReports.reduce((sum, report) => sum + report.tileCount, 0),
       rejectedBeforeProductPage: sourceReports.reduce((sum, report) => sum + report.rejectedBeforeProductPage, 0),
@@ -590,6 +658,11 @@ test.describe("BJ's store shopping list intelligence", () => {
       rejectedAfterProductPage: runCounts.rejected,
       duplicatesMerged: finalProgress.duplicatesMerged,
       failed: runCounts.failed,
+      listingNavigationMs: sourceReports.reduce((sum, report) => sum + report.listingNavigationMs, 0),
+      listingExtractionMs: sourceReports.reduce((sum, report) => sum + report.listingExtractionMs, 0),
+      productPageTimings,
+      averageProductPageDurationMs,
+      slowestProductPage,
       totalRuntimeMs,
       totalRuntime: `${Math.floor(totalRuntimeMs / 60000)}m ${Math.round((totalRuntimeMs % 60000) / 1000)}s`,
       averageRuntimePerStoreMs: totalRuntimeMs,
@@ -605,6 +678,8 @@ test.describe("BJ's store shopping list intelligence", () => {
     console.log(`Rejected after product page: ${runCounts.rejected}`);
     console.log(`Duplicates merged: ${scanSummary.duplicatesMerged}`);
     console.log(`Failed: ${scanSummary.failed}`);
+    console.log(`Average product page duration: ${msText(averageProductPageDurationMs)}`);
+    console.log(`Slowest product page: ${slowestProductPage ? `${msText(slowestProductPage.durationMs)} for ${slowestProductPage.productName ?? slowestProductPage.productUrl}` : 'n/a'}`);
     console.log(`Total runtime: ${scanSummary.totalRuntime}`);
     await writeFile(path.join(logDir, 'deal-execution-report.json'), JSON.stringify({
       auth,

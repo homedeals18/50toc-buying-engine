@@ -9,7 +9,7 @@
     "scrape:bjs:deals:manual-chrome": "node ./run-bjs-deals-manual-chrome.js",
     "scrape:bjs:deals:manual-chrome:direct": "node ./run-bjs-deals-manual-chrome.js",
     "unit": "node --test deal-filter.test.mjs",
-    "scrape:bjs:deals:test": "BJS_MAX_CLEARANCE_TILES_TO_INSPECT=20 BJS_MAX_WOW_DEALS_TILES_TO_INSPECT=20 BJS_MAX_CLEARANCE_PRODUCT_PAGES=5 BJS_MAX_WOW_DEALS_PRODUCT_PAGES=5 BJS_STORE_CONCURRENCY=1 BJS_PRODUCT_PAGE_CONCURRENCY=1 playwright test tests/deal-discovery.spec.js --project=chromium"
+    "scrape:bjs:deals:test": "BJS_MAX_CLEARANCE_TILES_TO_INSPECT=20 BJS_MAX_WOW_DEALS_TILES_TO_INSPECT=20 BJS_MAX_CLEARANCE_PRODUCT_PAGES=2 BJS_MAX_WOW_DEALS_PRODUCT_PAGES=2 BJS_STORE_CONCURRENCY=1 BJS_PRODUCT_PAGE_CONCURRENCY=1 playwright test tests/deal-discovery.spec.js --project=chromium"
   },
   "devDependencies": {
     "@playwright/test": "latest",

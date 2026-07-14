@@ -14,7 +14,10 @@ test('rejects requested appliances furniture batteries and electronics keywords 
     'appliance', 'appliances', 'kitchen appliance', 'home appliance', 'cooker', 'slow cooker', 'multi cooker',
     'blender', 'microwave', 'air fryer', 'toaster', 'vacuum', 'fan', 'heater', 'refrigerator', 'freezer',
     'washer', 'dryer', 'coffee maker', 'mattress', 'sofa', 'sectional', 'recliner', 'chair', 'furniture',
-    'battery', 'batteries', 'electronics', 'TV', 'television', 'soundbar', 'audio'
+    'battery', 'batteries', 'electronics', 'TV', 'television', 'soundbar', 'audio',
+    'volleyball', 'badminton', 'lawn game', 'seating set', 'dining set', 'deck tile', 'spatula',
+    'grill accessory', 'fridge', 'mini fridge', 'AirPods', 'headphones', 'Nintendo', 'video game',
+    'console', 'gaming', 'outdoor play', 'patio dining'
   ];
   for (const keyword of keywords) {
     const result = evaluateListingProduct({ productName: `Brand ${keyword} Deal` });
