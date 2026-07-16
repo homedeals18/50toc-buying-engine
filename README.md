@@ -129,23 +129,23 @@ BJS_MAX_CLEARANCE_PRODUCTS=5 BJS_MAX_WOW_DEALS_PRODUCTS=5 ./scripts/run-bjs-deal
 
 For first-time authentication, run headed so you can complete BJ's login manually. The test waits up to 10 minutes by default for manual login. Override this with `BJS_MANUAL_LOGIN_TIMEOUT_MS` if needed. After login succeeds, Playwright saves the persistent profile under `artifacts/bjs/profile` and future Playwright-mode runs reuse that session when BJ's still accepts it.
 
-### BJ's manual Chrome mode
+### BJ's browser mode investigation
 
-Use manual Chrome mode when you want the BJ's workflow to attach to your already-running regular Chrome session. The runner never starts Chrome and never creates another Chrome window; it first checks that Chrome exposes the debugging endpoint, then runs the BJ's deal scraper inside that existing browser session. Start Chrome yourself with `--remote-debugging-port=9222` and sign in to BJ's in that browser before running the scraper.
+BJ's does not currently require manual Chrome attach mode. The scraper's default mode already uses Playwright `chromium.launchPersistentContext()` with `artifacts/bjs/profile`, so the required browser state is a reusable Playwright profile rather than a CDP connection to an operator's existing Chrome session. Authentication is handled by completing BJ's login once in the headed Playwright browser; cookies and session storage are then reused from that persistent profile on later runs. JavaScript rendering is handled by Playwright Chromium. The code still checks for BJ's `Access Denied` responses and stops if BJ's blocks the automation, but the project has not identified a BJ's-only Cloudflare, bot-detection, cookie, or JavaScript limitation that requires attaching to regular Chrome.
 
-Run from the repository root:
+The direct BJ's command used by development and orchestration is therefore the normal persistent-context command:
 
 ```bash
-npm run scrape:bjs:deals:manual-chrome
+npm run scrape:bjs:deals
 ```
 
-If Windows reports a spawn `EINVAL` error through `npm`, use the direct Node launcher from the repository root. This bypasses `npx` and calls the local Playwright CLI with `process.execPath`:
+Manual Chrome/CDP remains only as an optional diagnostic escape hatch when an operator specifically wants to reuse an already-open Chrome session:
 
 ```powershell
 node automation/bjs/run-bjs-deals-manual-chrome.js
 ```
 
-The manual script connects to `http://127.0.0.1:9222` by default; override it with `BJS_CHROME_CDP_ENDPOINT` if you use a different host or port. If Chrome was not started with remote debugging enabled, the script exits with setup instructions instead of launching Chrome or creating a dedicated profile. The normal Playwright launch mode remains available as the fallback with `./scripts/run-bjs-deals-test.sh`.
+If that diagnostic path is used, the script connects to `http://127.0.0.1:9222` by default; override it with `BJS_CHROME_CDP_ENDPOINT` if you use a different host or port. The simplest long-term BJ's architecture is to keep one dedicated Playwright persistent profile under `artifacts/bjs/profile`, document manual login for first-time authentication or session refreshes, and reserve CDP attach for temporary troubleshooting only.
 
 ## RevSeller local integration
 
