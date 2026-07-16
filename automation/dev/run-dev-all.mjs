@@ -21,7 +21,7 @@ const connectors = [
     env: 'BJS_CONNECTOR_ENABLED',
     defaultEnabled: true,
     command: 'npm',
-    args: ['run', 'scrape:bjs:deals:manual-chrome:direct'],
+    args: ['run', 'scrape:bjs:deals'],
     artifactPath: resolveArtifactPath('bjs', 'logs', 'deal-products.json'),
     gracefulFailure: true
   },

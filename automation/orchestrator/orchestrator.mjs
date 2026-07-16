@@ -15,7 +15,7 @@ export const executionLogPath = path.join(orchestratorArtifactRoot, 'execution-l
 export const moduleExecutionReportPath = path.join(orchestratorArtifactRoot, 'module-execution-report.json');
 
 export const connectorModules = [
-  { id: 'bjs', name: "BJ's Wholesale Club Connector", enabledEnv: 'BJS_CONNECTOR_ENABLED', defaultEnabled: true, command: 'npm', args: ['run', 'scrape:bjs:deals:manual-chrome:direct'], outputPath: resolveArtifactPath('bjs', 'logs', 'deal-products.json') },
+  { id: 'bjs', name: "BJ's Wholesale Club Connector", enabledEnv: 'BJS_CONNECTOR_ENABLED', defaultEnabled: true, command: 'npm', args: ['run', 'scrape:bjs:deals'], outputPath: resolveArtifactPath('bjs', 'logs', 'deal-products.json') },
   { id: 'costco_business_center', name: 'Costco Business Center Connector', enabledEnv: 'COSTCO_BUSINESS_CENTER_CONNECTOR_ENABLED', defaultEnabled: true, command: 'npm', args: ['run', 'scrape:costco-business-center:instant-savings'], outputPath: resolveArtifactPath('costco_business_center', 'logs', 'deal-products.json') },
   { id: 'sams_club', name: "Sam's Club Connector", enabledEnv: 'SAMS_CLUB_CONNECTOR_ENABLED', defaultEnabled: true, command: 'npm', args: ['run', 'scrape:sams-club:clearance'], outputPath: resolveArtifactPath('sams_club', 'logs', 'deal-products.json') }
 ];

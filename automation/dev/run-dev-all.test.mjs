@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runConnector, validateGeneratedJson } from './run-dev-all.mjs';
 
-test("runConnector downgrades BJ's manual Chrome failures to warnings", async () => {
+test("runConnector downgrades BJ's scraper failures to warnings", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'dev-all-bjs-graceful-'));
   const result = await runConnector({
     label: "BJ's",
@@ -23,7 +23,7 @@ test("runConnector downgrades BJ's manual Chrome failures to warnings", async ()
 
 test('validateGeneratedJson only reads generated report file names', async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'dev-all-json-validation-'));
-  const profileDir = path.join(tempRoot, 'artifacts', 'bjs', 'manual-chrome-profile', 'Default');
+  const profileDir = path.join(tempRoot, 'artifacts', 'bjs', 'profile', 'Default');
   const logsDir = path.join(tempRoot, 'artifacts', 'bjs', 'logs');
   await mkdir(profileDir, { recursive: true });
   await mkdir(logsDir, { recursive: true });
