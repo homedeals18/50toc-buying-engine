@@ -630,12 +630,18 @@ test.describe("BJ's store shopping list intelligence", () => {
             await saveProgress(products, { lastStore: null, lastUrl: enrichedProduct.productUrl, processedProductKeys: [...processedProductKeys], storeConcurrency, productPageConcurrency });
           } else {
             counts.rejected += 1;
+            processedProductKeys.add(productIdentity(enrichedProduct));
+            await saveProgress(products, { lastStore: null, lastUrl: enrichedProduct.productUrl, processedProductKeys: [...processedProductKeys], storeConcurrency, productPageConcurrency });
             console.log(`BJ's ${dealSource.name}: skipped unrelated category "${enrichedProduct.category}" for ${enrichedProduct.productName ?? enrichedProduct.productUrl}.`);
           }
         } catch (error) {
           counts.failed += 1;
           failures.push({ productUrl: product.productUrl, productName: product.productName, error: error.message });
           console.warn(`BJ's ${dealSource.name}: failed to scrape ${product.productName ?? product.productUrl}: ${error.message}`);
+          if (/Access Denied detected/i.test(error.message)) {
+            console.warn(`BJ's ${dealSource.name}: stopping this source after the first Access Denied response. Run the scraper again later to resume from saved progress.`);
+            break;
+          }
         }
       }
       runCounts.attempted += counts.attempted;
