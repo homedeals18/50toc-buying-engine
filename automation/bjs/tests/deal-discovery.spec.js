@@ -15,8 +15,14 @@ const maxListingScreenshots = Number(process.env.BJS_DEALS_MAX_LISTING_SCREENSHO
 const productPageConcurrency = Number(process.env.BJS_PRODUCT_PAGE_CONCURRENCY ?? 1);
 const blockedResourcePattern = /doubleclick|google-analytics|googletagmanager|facebook|hotjar|optimizely|segment|adsystem|adservice|analytics|tracker|tracking/i;
 const storeConcurrency = Number(process.env.BJS_STORE_CONCURRENCY ?? 3);
-const productPageLimitPerSource = (value) => Math.min(Number(value ?? 2), 2);
-const tileLimitPerSource = (value) => Math.min(Number(value ?? 20), 20);
+const unlimitedScanLimit = Number.MAX_SAFE_INTEGER;
+const scanLimit = (value) => {
+  if (value === undefined || value === null || String(value).trim() === '') return unlimitedScanLimit;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : unlimitedScanLimit;
+};
+const productPageLimitPerSource = scanLimit;
+const tileLimitPerSource = scanLimit;
 const dealSources = [
   { name: 'Clearance', searchTerm: 'clearance', maxTilesToInspect: tileLimitPerSource(process.env.BJS_MAX_CLEARANCE_TILES_TO_INSPECT ?? process.env.BJS_MAX_CLEARANCE_TILES), maxProductPages: productPageLimitPerSource(process.env.BJS_MAX_CLEARANCE_PRODUCT_PAGES ?? process.env.BJS_MAX_CLEARANCE_PRODUCTS ?? process.env.BJS_MAX_RELEVANT_PRODUCT_PAGES ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES) },
   { name: 'Wow Deals', searchTerm: 'wow deals', maxTilesToInspect: tileLimitPerSource(process.env.BJS_MAX_WOW_DEALS_TILES_TO_INSPECT ?? process.env.BJS_MAX_WOW_DEALS_TILES), maxProductPages: productPageLimitPerSource(process.env.BJS_MAX_WOW_DEALS_PRODUCT_PAGES ?? process.env.BJS_MAX_WOW_DEALS_PRODUCTS ?? process.env.BJS_MAX_RELEVANT_PRODUCT_PAGES ?? process.env.BJS_DEALS_MAX_PRODUCT_PAGES) }
