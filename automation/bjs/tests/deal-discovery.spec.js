@@ -379,8 +379,13 @@ async function saveProgress(products, progress = {}) {
   const evaluatedProducts = await runBuyingPipeline(deduped.products);
   await writeFile(dealProductsPath, JSON.stringify(evaluatedProducts, null, 2));
   await writeCombinedShoppingListReport("BJ's Wholesale Club", evaluatedProducts, shoppingListReportPath);
-  const processedProductKeys = [...new Set([...(progress.processedProductKeys ?? []), ...deduped.products.flatMap(progressKeys)])];
-  await writeFile(scanProgressPath, JSON.stringify({ ...progress, processedProductKeys, productsSaved: evaluatedProducts.length, duplicatesMerged: deduped.duplicatesMerged, updatedAt: new Date().toISOString() }, null, 2));
+  const existingProgress = await loadScanProgress();
+  const processedProductKeys = [...new Set([
+    ...(existingProgress.processedProductKeys ?? []),
+    ...(progress.processedProductKeys ?? []),
+    ...deduped.products.flatMap(progressKeys)
+  ])];
+  await writeFile(scanProgressPath, JSON.stringify({ ...existingProgress, ...progress, processedProductKeys, productsSaved: evaluatedProducts.length, duplicatesMerged: deduped.duplicatesMerged, updatedAt: new Date().toISOString() }, null, 2));
   return { evaluatedProducts, duplicatesMerged: deduped.duplicatesMerged };
 }
 
