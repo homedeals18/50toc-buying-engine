@@ -227,15 +227,28 @@ async function expectedResultCount(page) {
 
 async function loadMoreProductsIfAvailable(page) {
   const expected = await expectedResultCount(page);
-  for (let attempts = 0; attempts < 5; attempts += 1) {
+  let stagnantAttempts = 0;
+
+  for (let attempts = 0; attempts < 100; attempts += 1) {
     const detected = await page.locator(bjsProductLinkSelector).evaluateAll((links) => new Set(links.map((link) => link.href).filter(Boolean)).size).catch(() => 0);
     if (expected && detected >= expected) break;
+
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => undefined);
+    await page.waitForTimeout(750);
+
     const loadMore = page.locator('button:has-text("Load More"), a:has-text("Load More")').first();
-    if (!(await loadMore.isVisible({ timeout: 1_000 }).catch(() => false))) break;
-    await loadMore.click({ timeout: 5_000 }).catch(() => undefined);
-    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => undefined);
-    await page.waitForTimeout(500);
+    if (await loadMore.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await loadMore.click({ timeout: 5_000 }).catch(() => undefined);
+      await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => undefined);
+      await page.waitForTimeout(750);
+    }
+
+    const updated = await page.locator(bjsProductLinkSelector).evaluateAll((links) => new Set(links.map((link) => link.href).filter(Boolean)).size).catch(() => detected);
+    stagnantAttempts = updated > detected ? 0 : stagnantAttempts + 1;
+    if (stagnantAttempts >= 3) break;
   }
+
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => undefined);
 }
 
 async function searchSiteForDealSource(page, dealSource) {
