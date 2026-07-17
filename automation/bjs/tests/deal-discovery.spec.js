@@ -358,6 +358,15 @@ async function loadScanProgress() {
   }
 }
 
+async function loadExistingDealProducts() {
+  try {
+    const saved = JSON.parse(await readFile(dealProductsPath, 'utf8'));
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
 async function saveProgress(products, progress = {}) {
   await ensureArtifactDirs();
   const unifiedProducts = products.map(unifiedDeal).filter(categoryAllowed);
@@ -559,7 +568,7 @@ test.describe("BJ's store shopping list intelligence", () => {
     const existingProgress = await loadScanProgress();
     const processedProductKeys = new Set(existingProgress.processedProductKeys ?? []);
     const sourceReports = [];
-    const products = [];
+    const products = await loadExistingDealProducts();
     const runCounts = { attempted: 0, accepted: 0, rejected: 0, failed: 0 };
     const productPageTimings = [];
 
