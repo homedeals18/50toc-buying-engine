@@ -367,6 +367,11 @@ async function loadExistingDealProducts() {
   }
 }
 
+function progressKeys(product = {}) {
+  const url = normalizeProductUrl(product.productUrl);
+  return [...new Set([productIdentity(product), url ? `url:${url}` : null].filter(Boolean))];
+}
+
 async function saveProgress(products, progress = {}) {
   await ensureArtifactDirs();
   const unifiedProducts = products.map(unifiedDeal).filter(categoryAllowed);
@@ -374,7 +379,7 @@ async function saveProgress(products, progress = {}) {
   const evaluatedProducts = await runBuyingPipeline(deduped.products);
   await writeFile(dealProductsPath, JSON.stringify(evaluatedProducts, null, 2));
   await writeCombinedShoppingListReport("BJ's Wholesale Club", evaluatedProducts, shoppingListReportPath);
-  const processedProductKeys = [...new Set([...(progress.processedProductKeys ?? []), ...deduped.products.map(productIdentity)])];
+  const processedProductKeys = [...new Set([...(progress.processedProductKeys ?? []), ...deduped.products.flatMap(progressKeys)])];
   await writeFile(scanProgressPath, JSON.stringify({ ...progress, processedProductKeys, productsSaved: evaluatedProducts.length, duplicatesMerged: deduped.duplicatesMerged, updatedAt: new Date().toISOString() }, null, 2));
   return { evaluatedProducts, duplicatesMerged: deduped.duplicatesMerged };
 }
@@ -569,6 +574,9 @@ test.describe("BJ's store shopping list intelligence", () => {
     const processedProductKeys = new Set(existingProgress.processedProductKeys ?? []);
     const sourceReports = [];
     const products = await loadExistingDealProducts();
+    for (const savedProduct of products) {
+      for (const key of progressKeys(savedProduct)) processedProductKeys.add(key);
+    }
     const runCounts = { attempted: 0, accepted: 0, rejected: 0, failed: 0 };
     const productPageTimings = [];
 
@@ -604,8 +612,9 @@ test.describe("BJ's store shopping list intelligence", () => {
         console.log(`Rejected before product page: ${productName} — ${matched}`);
       }
       const prefilteredRelevantProducts = prefilteredProducts.filter((entry) => entry.filter.accepted).map((entry) => entry.product);
-      const resumedSkippedCount = prefilteredRelevantProducts.filter((product) => processedProductKeys.has(productIdentity(product))).length;
-      const relevantListingProducts = prefilteredRelevantProducts.filter((product) => !processedProductKeys.has(productIdentity(product)));
+      const wasProcessed = (product) => progressKeys(product).some((key) => processedProductKeys.has(key));
+      const resumedSkippedCount = prefilteredRelevantProducts.filter(wasProcessed).length;
+      const relevantListingProducts = prefilteredRelevantProducts.filter((product) => !wasProcessed(product));
       const rejectedBeforeProductPage = prefilteredProducts.length - prefilteredRelevantProducts.length;
       const expectedProducts = await expectedResultCount(page);
       console.log(`BJ's ${dealSource.name}: detected ${listingProducts.length} product tiles before opening product pages${expectedProducts ? ` (page reports ${expectedProducts} Results)` : ''}; rejected ${rejectedBeforeProductPage} before product page; ${relevantListingProducts.length} remain.`);
@@ -635,11 +644,11 @@ test.describe("BJ's store shopping list intelligence", () => {
             sourceProducts.push(enrichedProduct);
             products.push(enrichedProduct);
             counts.accepted += 1;
-            processedProductKeys.add(productIdentity(enrichedProduct));
+            for (const key of [...progressKeys(product), ...progressKeys(enrichedProduct)]) processedProductKeys.add(key);
             await saveProgress(products, { lastStore: null, lastUrl: enrichedProduct.productUrl, processedProductKeys: [...processedProductKeys], storeConcurrency, productPageConcurrency });
           } else {
             counts.rejected += 1;
-            processedProductKeys.add(productIdentity(enrichedProduct));
+            for (const key of [...progressKeys(product), ...progressKeys(enrichedProduct)]) processedProductKeys.add(key);
             await saveProgress(products, { lastStore: null, lastUrl: enrichedProduct.productUrl, processedProductKeys: [...processedProductKeys], storeConcurrency, productPageConcurrency });
             console.log(`BJ's ${dealSource.name}: skipped unrelated category "${enrichedProduct.category}" for ${enrichedProduct.productName ?? enrichedProduct.productUrl}.`);
           }
