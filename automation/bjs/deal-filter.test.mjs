@@ -68,3 +68,27 @@ test('rejects fresh produce by product name when category metadata is missing', 
   assert.equal(categoryAllowed({ productName: 'Wellsley Farms Hass Avocados, 5 ct.', category: null }), false);
   assert.equal(categoryAllowed({ productName: 'Shelf-Stable Avocado Oil, 1 L', category: 'Grocery' }), true);
 });
+
+test('rejects observed BJ fresh produce and refrigerated lemonade names', () => {
+  for (const productName of [
+    'Cherries, 2 lbs.',
+    'Nectarines, 4 lbs.',
+    'Seedless Watermelon, 1 ct.',
+    'Chiquita Organic Bananas, 2 lbs.',
+    'Wellsley Farms Fresh Gourmet Carrots, 2 pk./1 lb.',
+    'Seedless Green Grapes, 3 lbs.',
+    'Wellsley Farms Vidalia Sweet Onions, 5 lbs.',
+    'Wellsley Farms Organic Baby Cut Carrots, 2 lbs.',
+    'Angel Sweet Grape Tomatoes, 2 lbs.',
+    'Wellsley Farms English Seedless Cucumbers, 2 ct.',
+    'Simply Lemonade with Raspberry, Bottles, 3 pk./52 fl. oz.'
+  ]) {
+    assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
+  }
+});
+
+test('keeps non-food lemon and oatmilk color names while rejecting air purifier', () => {
+  assert.equal(categoryAllowed({ productName: 'Artstyle Lemon Twist Summer Plates', category: 'Grocery' }), true);
+  assert.equal(categoryAllowed({ productName: 'Contigo Travel Mug - Licorice & Oatmilk', category: 'Grocery' }), true);
+  assert.equal(categoryAllowed({ productName: 'Shark Air Purifier - White', category: 'Health & Household' }), false);
+});
