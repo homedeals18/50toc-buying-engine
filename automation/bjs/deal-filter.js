@@ -71,8 +71,10 @@ export function listingProductAllowed(product = {}) {
 
 export function categoryAllowed(product = {}) {
   const category = compact(product.category);
+  const productText = compact([product.productName, category].filter(Boolean).join(' '));
+  if (frozenChilledPattern.test(productText)) return false;
   if (!category) return true;
-  return wantedCategoryPattern.test(category) && !rejectedDepartmentPattern.test(category) && !frozenChilledPattern.test(category);
+  return wantedCategoryPattern.test(category) && !rejectedDepartmentPattern.test(category);
 }
 
 export function normalizeProductUrl(value) {
