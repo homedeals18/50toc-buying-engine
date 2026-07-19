@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { runBuyingPipeline, writeCombinedShoppingListReport } from '../../shared/buying-engine.js';
 import { categoryAllowed, evaluateListingProduct, listingProductAllowed, mergeDuplicateProducts, normalizeProductUrl, productIdentity } from '../deal-filter.js';
+import { normalizeBjsPrice } from '../price-utils.mjs';
 
 const artifactRoot = path.resolve(process.cwd(), '../../artifacts/bjs');
 const screenshotDir = path.join(artifactRoot, 'screenshots');
@@ -338,8 +339,8 @@ function unifiedDeal(product) {
     sku: product.sku ?? null,
     upc: product.upc ?? null,
     packageSize: product.packageSize ?? null,
-    currentPrice: product.currentPrice ?? null,
-    originalPrice: product.originalPrice ?? null,
+    currentPrice: normalizeBjsPrice(product.currentPrice),
+    originalPrice: normalizeBjsPrice(product.originalPrice),
     discount: product.discount ?? null,
     coupon: product.coupon ?? null,
     availability: product.availability ?? null,
