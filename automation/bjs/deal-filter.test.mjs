@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateListingProduct, mergeDuplicateProducts, productIdentity } from './deal-filter.js';
+import { categoryAllowed, evaluateListingProduct, mergeDuplicateProducts, productIdentity } from './deal-filter.js';
 
 test('rejects unrelated departments before product page', () => {
   for (const word of ['Furniture', 'Garden', 'Toys', 'Electronics', 'Mattresses', 'Patio']) {
