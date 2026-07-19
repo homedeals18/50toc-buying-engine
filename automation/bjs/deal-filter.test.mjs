@@ -63,3 +63,8 @@ test('deduplicates by UPC before SKU and URL', () => {
   assert.equal(result.products[0].stores.length, 2);
   assert.equal(productIdentity(result.products[0]), 'upc:123');
 });
+
+test('rejects fresh produce by product name when category metadata is missing', () => {
+  assert.equal(categoryAllowed({ productName: 'Wellsley Farms Hass Avocados, 5 ct.', category: null }), false);
+  assert.equal(categoryAllowed({ productName: 'Shelf-Stable Avocado Oil, 1 L', category: 'Grocery' }), true);
+});

@@ -4,7 +4,7 @@ const rejectedDepartmentPattern = /\b(appliances?|kitchen[\s_-]+appliances?|home
 
 const rejectedVarietyPattern = /\b(variety(?:\s+pack)?|assorted|assortment|mixed\s+(?:pack|variety|flavo[u]?r)|multi\s+flavo[u]?r|flavo[u]?r\s+variety|sampler)\b/i;
 
-const frozenChilledPattern = /\b(frozen|refrigerated|chilled|meat|seafood|fish|dairy|produce|fresh fruit|fresh vegetables?|avocados?)\b/i;
+const frozenChilledPattern = /\b(frozen|refrigerated|chilled|meat|seafood|fish|dairy|produce|fresh fruit|fresh vegetables?|avocados?(?!\s+(?:oil|chips?|snacks?)))\b/i;
 
 const listingSignalFields = [
   ['product name', 'productName'],
@@ -71,8 +71,10 @@ export function listingProductAllowed(product = {}) {
 
 export function categoryAllowed(product = {}) {
   const category = compact(product.category);
+  const productText = compact([product.productName, category].filter(Boolean).join(' '));
+  if (frozenChilledPattern.test(productText)) return false;
   if (!category) return true;
-  return wantedCategoryPattern.test(category) && !rejectedDepartmentPattern.test(category) && !frozenChilledPattern.test(category);
+  return wantedCategoryPattern.test(category) && !rejectedDepartmentPattern.test(category);
 }
 
 export function normalizeProductUrl(value) {
