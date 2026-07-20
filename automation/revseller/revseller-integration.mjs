@@ -96,7 +96,8 @@ function meaningfulWarning(value, labels) {
   const ignored = ['position', ...(Array.isArray(labels) ? labels : [labels])]
     .map((label) => String(label ?? '').trim().toLowerCase())
     .filter(Boolean);
-  if (!cleaned || ignored.includes(cleaned.toLowerCase())) return null;
+  const normalized = cleaned.toLowerCase();
+  if (!cleaned || ignored.some((label) => normalized === label || normalized === `${label} position`)) return null;
   return cleaned;
 }
 
@@ -140,7 +141,8 @@ export function extractRevsellerFields({ panelText, asin, productTitle, productU
   const profitText = firstValid(isMoneyValue, valueAfterLabel(text, '(?:Estimated Profit|Est\\.? Profit|Net Profit|Profit)'), fields.estimatedProfit);
   const roiText = firstValid(isPercentValue, valueAfterLabel(text, 'ROI'), fields.roi);
   const hazmatText = meaningfulWarning(firstNonEmpty(valueAfterLabel(text, 'Hazmat'), fields.hazmatWarning), 'hazmat');
-  const meltableText = meaningfulWarning(firstNonEmpty(valueAfterLabel(text, 'Meltable'), fields.meltableWarning), 'meltable');
+  const rawMeltableText = valueAfterLabel(text, 'Meltable');
+  const meltableText = rawMeltableText ? meaningfulWarning(rawMeltableText, 'meltable') : firstNonEmpty(fields.meltableWarning);
   const ipText = meaningfulWarning(firstNonEmpty(valueAfterLabel(text, '(?:IP / Restriction warnings?|IP Alert|IP Warning|Restriction warnings?|Restrictions?)'), fields.ipRestrictionWarnings), ['ip', 'ip alert', 'ip warning', 'restriction', 'restrictions']);
   return {
     asin: extractedAsin,
