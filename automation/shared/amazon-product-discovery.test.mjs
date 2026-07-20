@@ -15,6 +15,7 @@ import {
   selectBestAmazonCandidate
 } from './amazon-product-discovery.mjs';
 import { sanitizeProductBrand } from './product-brand.mjs';
+import { extractPackageSize } from './product-package.mjs';
 
 const searchHtml = `
   <div data-asin="B000LOW111"><h2><span>Other Brand Chips 10 oz</span></h2><a href="/dp/B000LOW111/ref=sxin"></a></div>
@@ -324,4 +325,20 @@ test('Amazon analysis records discovery rejection details', async () => {
   });
   assert.equal(analysis.discovery.matched, false);
   assert.equal(typeof analysis.discovery.rejectionReason, 'string');
+});
+
+
+test('extracts piece counts and combined package sizes from product names', () => {
+  assert.equal(extractPackageSize('NUK SafeTemp 12-Pc. Gift Set'), '12 pc');
+  assert.equal(extractPackageSize('Reduce Tumbler, 14 oz./2 pk.'), '14 oz / 2 pk');
+  assert.equal(extractPackageSize('Cleaning Paste 300g'), '300 g');
+  assert.equal(extractPackageSize('Filtrete 20" x 25" x 1" Filters, 3 pk.'), '3 pk');
+});
+
+test('Amazon query recovers package size from the store product name', () => {
+  const query = buildAmazonSearchQuery({
+    productName: 'NUK Simply Natural Bottles with SafeTemp 12-Pc. Gift Set',
+    packageSize: null
+  });
+  assert.match(query, /12 pc$/);
 });
