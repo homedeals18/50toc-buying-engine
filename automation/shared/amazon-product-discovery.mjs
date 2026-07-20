@@ -67,7 +67,10 @@ function productPackageSize(product) {
 }
 
 export function buildAmazonSearchQuery(product) {
-  return [productBrand(product), productName(product), productPackageSize(product)].filter(Boolean).join(' ');
+  const name = productName(product);
+  const packageSize = productPackageSize(product);
+  const packageAlreadyInName = packageSize && extractPackageSize(name) === packageSize;
+  return [productBrand(product), name, packageAlreadyInName ? null : packageSize].filter(Boolean).join(' ');
 }
 
 function scoreCandidate(product, candidate) {
