@@ -175,8 +175,26 @@ export async function discoverAmazonProduct(product, { fetchText, page, minimumM
         : `Opened Amazon product match score ${productPageScore} is below minimum ${minimumMatchScore}`
     };
   }
+  const hasStrongIdentitySignal = Boolean(
+    normalizedUpc(product.upc ?? product.UPC ?? product.gtin)
+    || productBrand(product)
+    || clean(product.packageSize)
+  );
+  if (!hasStrongIdentitySignal) {
+    return {
+      sourceProduct: product,
+      searchQuery,
+      searchUrl,
+      matched: false,
+      needsReview: true,
+      matchScore: productPageScore,
+      amazonProduct: null,
+      candidates: [{ ...bestCandidate, ...parsedProduct, matchScore: productPageScore }],
+      rejectionReason: 'Manual review required because the store product has no UPC, trusted brand, or package size'
+    };
+  }
   const amazonProduct = { ...bestCandidate, ...parsedProduct, matchScore: productPageScore };
-  return { sourceProduct: product, searchQuery, searchUrl, matched: true, matchScore: productPageScore, amazonProduct };
+  return { sourceProduct: product, searchQuery, searchUrl, matched: true, needsReview: false, matchScore: productPageScore, amazonProduct };
 }
 
 export async function readRevsellerForDiscoveredAmazonProduct(page, { screenshotPath = defaultRevsellerUnavailableScreenshotPath, htmlPath = defaultRevsellerUnavailableHtmlPath, panelTextPath, frameDebugPath } = {}) {
@@ -223,6 +241,15 @@ export async function analyzeAmazonProduct(product, { fetchText, page, revseller
   const analysis = {
     storeProduct: product,
     amazonProduct: discovery.amazonProduct,
+    discovery: {
+      matched: discovery.matched,
+      needsReview: Boolean(discovery.needsReview),
+      matchScore: discovery.matchScore ?? null,
+      rejectionReason: discovery.rejectionReason ?? null,
+      searchQuery: discovery.searchQuery,
+      searchUrl: discovery.searchUrl,
+      candidates: discovery.candidates ?? []
+    },
     revseller: null
   };
 
