@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { getAmazonBrowserPage } from '../amazon/browser-session/index.mjs';
 import { detectRevsellerPanel, extractRevsellerFields, readRevsellerPanel, revsellerFieldsFound, saveRevsellerFrameDebugArtifact, saveRevsellerNotVisibleArtifacts, saveRevsellerPanelArtifacts, saveRevsellerPanelTextArtifact, writeRevsellerAnalysisReport } from '../revseller/revseller-integration.mjs';
 import { runStandardizedModule, toProjectRelativePath } from './module-interface.mjs';
+import { sanitizeProductBrand } from './product-brand.mjs';
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const defaultProductDiscoveryPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'product-discovery.json');
@@ -57,7 +58,7 @@ function productName(product) {
 }
 
 function productBrand(product) {
-  return clean(product.brand);
+  return sanitizeProductBrand(product.brand) ?? '';
 }
 
 export function buildAmazonSearchQuery(product) {
