@@ -97,7 +97,7 @@ function meaningfulWarning(value, labels) {
     .map((label) => String(label ?? '').trim().toLowerCase())
     .filter(Boolean);
   const normalized = cleaned.toLowerCase();
-  if (!cleaned || ignored.some((label) => normalized === label || normalized === `${label} position`)) return null;
+  if (!cleaned || /^(?:variation\s+)?position$/i.test(cleaned) || ignored.some((label) => normalized === label || normalized === `${label} position`)) return null;
   return cleaned;
 }
 
