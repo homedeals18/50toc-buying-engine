@@ -171,3 +171,12 @@ test('prefers RevSeller visible text nodes found inside iframe render contexts',
   assert.equal(data.estimatedProfit, '$6.25');
   assert.equal(data.roi, '38%');
 });
+
+test('extracts current RevSeller layout from visible frame text', () => {
+  const liveText = 'Rstr 252,958 in Toys & Games 2.71% 30d Sales -- Sell Price Buy Cost Net 6.56 8.82 Low FBA $19.29 0 Low FBM -- Buy Box $19.29 1 Amz --';
+  const result = extractRevsellerFields({ panelText: 'chrome-extension://gobliffocflfaekfcaccndlffkhcafhb/html/comp-table.html', panelFound: true, frameDebug: [{ diagnostics: { visibleTextCandidates: [{ text: liveText, textNodes: [] }] } }] });
+  assert.equal(result.currentAmazonPrice, 19.29);
+  assert.equal(result.sellingPrice, '$19.29');
+  assert.equal(result.bsr, '252,958');
+  assert.equal(result.category, 'Toys & Games');
+});
