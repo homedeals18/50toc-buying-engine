@@ -14,6 +14,7 @@ import {
   runAmazonProductDiscovery,
   selectBestAmazonCandidate
 } from './amazon-product-discovery.mjs';
+import { sanitizeProductBrand } from './product-brand.mjs';
 
 const searchHtml = `
   <div data-asin="B000LOW111"><h2><span>Other Brand Chips 10 oz</span></h2><a href="/dp/B000LOW111/ref=sxin"></a></div>
@@ -281,4 +282,22 @@ test('uses exact UPC before title similarity and rejects a UPC mismatch', () => 
   );
   assert.equal(exact.asin, 'B000RIGHT2');
   assert.equal(exact.matchScore, 100);
+});
+
+
+test('rejects BJ navigation copy as a brand while preserving real brands', () => {
+  assert.equal(sanitizeProductBrand('s Recipes & Buying Guides Shopping Locations Coupons BJ'), null);
+  assert.equal(sanitizeProductBrand('s Now Ships FREE SNAP EBT Eligible ADD TO CART Smart Summary'), null);
+  assert.equal(sanitizeProductBrand('Wellsley Farms'), 'Wellsley Farms');
+  assert.equal(sanitizeProductBrand('Berkley Jensen'), 'Berkley Jensen');
+});
+
+test('Amazon search query omits polluted BJ brand text', () => {
+  const query = buildAmazonSearchQuery({
+    brand: 's Recipes & Buying Guides Shopping Locations Coupons BJ',
+    productName: 'Artstyle Lemon Twist Summer 12" Oval Plates, 50 ct.',
+    packageSize: '50 ct'
+  });
+  assert.equal(query, 'Artstyle Lemon Twist Summer 12" Oval Plates, 50 ct. 50 ct');
+  assert.doesNotMatch(query, /Recipes|Coupons|Shopping Locations/);
 });
