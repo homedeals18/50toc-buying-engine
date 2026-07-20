@@ -25,5 +25,8 @@
     "scrape:bjs:deals:test": "npm --prefix automation/bjs run scrape:bjs:deals:test",
     "test:bjs:filter": "npm --prefix automation/bjs run unit",
     "repair:bjs:data": "npm --prefix automation/bjs run repair:data"
+  },
+  "devDependencies": {
+    "playwright": "latest"
   }
 }
