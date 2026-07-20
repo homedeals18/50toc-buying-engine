@@ -301,3 +301,27 @@ test('Amazon search query omits polluted BJ brand text', () => {
   assert.equal(query, 'Artstyle Lemon Twist Summer 12" Oval Plates, 50 ct. 50 ct');
   assert.doesNotMatch(query, /Recipes|Coupons|Shopping Locations/);
 });
+
+
+test('requires manual review when UPC trusted brand and package size are all missing', async () => {
+  const exactSearch = '<div data-asin="B0GF9VRJLY"><h2><span>The Pink Stuff The Miracle Squeezable Cleaning Paste 300g</span></h2><a href="/dp/B0GF9VRJLY"></a></div>';
+  const exactProduct = '<input name="ASIN" value="B0GF9VRJLY"><span id="productTitle">The Pink Stuff The Miracle Squeezable Cleaning Paste 300g</span>';
+  const discovery = await discoverAmazonProduct(
+    { productName: 'The Pink Stuff Miracle Cleaning Paste', brand: null, upc: null, packageSize: null },
+    { fetchText: async (url) => url.includes('/s?') ? exactSearch : exactProduct }
+  );
+
+  assert.equal(discovery.matched, false);
+  assert.equal(discovery.needsReview, true);
+  assert.equal(discovery.amazonProduct, null);
+  assert.match(discovery.rejectionReason, /no UPC, trusted brand, or package size/);
+});
+
+test('Amazon analysis records discovery rejection details', async () => {
+  const analysis = await runAmazonAnalysis({
+    product: { productName: 'The Pink Stuff Miracle Cleaning Paste' },
+    fetchText: async () => '<div data-asin="B0GF9VRJLY"><h2><span>The Pink Stuff The Miracle Squeezable Cleaning Paste 300g</span></h2><a href="/dp/B0GF9VRJLY"></a></div>'
+  });
+  assert.equal(analysis.discovery.matched, false);
+  assert.equal(typeof analysis.discovery.rejectionReason, 'string');
+});
