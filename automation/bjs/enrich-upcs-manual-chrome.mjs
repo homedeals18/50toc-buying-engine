@@ -83,12 +83,17 @@ async function collectDomCandidates(page, product) {
     const metaValues = [...document.querySelectorAll('meta[itemprop*="gtin" i], meta[itemprop*="upc" i], meta[property*="upc" i], [data-upc], [data-gtin]')]
       .flatMap((node) => [node.getAttribute('content'), node.getAttribute('data-upc'), node.getAttribute('data-gtin')])
       .filter(Boolean);
+    const specificationText = [...document.querySelectorAll('.specs-table-row, [class*="specs-table" i] tr, [data-testid*="specification" i]')]
+      .map((node) => (node.textContent || '').trim())
+      .filter(Boolean)
+      .join('\n');
     return {
       title: document.title,
       bodyText: (document.body?.innerText || '').slice(0, 750_000),
       jsonLd,
       relevantScripts,
-      metaValues
+      metaValues,
+      specificationText
     };
   }, { sku: product.sku ?? null });
 
@@ -102,6 +107,7 @@ async function collectDomCandidates(page, product) {
   const candidates = [
     ...productJsonCandidates(payload.jsonLd, product),
     ...payload.metaValues.map(normalizeGtin).filter(Boolean),
+    ...extractLabeledGtinCandidates(payload.specificationText),
     ...extractLabeledGtinCandidates(payload.bodyText),
     ...payload.relevantScripts.flatMap((text) => extractGtinCandidatesNearIdentity(text, identities))
   ];
@@ -163,7 +169,7 @@ async function main() {
       } else {
         run.notFound += 1;
       }
-      const result = { key, sku: product.sku ?? null, productName: product.productName, productUrl: product.productUrl, specificationsExpanded, status, candidates };
+      const result = { key, sku: product.sku ?? null, productName: product.productName, productUrl: product.productUrl, specificationsExpanded, specificationsPresent: Boolean(await page.locator('.specs-table-row, [class*="specs-table" i]').count()), status, candidates };
       progress.products[key] = { ...result, checkedAt: new Date().toISOString() };
       run.results.push(result);
       await writeJsonAtomic(productsPath, products);
