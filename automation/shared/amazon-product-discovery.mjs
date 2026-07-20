@@ -47,6 +47,11 @@ function tokenSet(value) {
   return new Set(normalized(value).replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((token) => token.length > 1));
 }
 
+function normalizedUpc(value) {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  return digits.length >= 8 ? digits.replace(/^0+(?=\d{8,}$)/, '') : '';
+}
+
 function productName(product) {
   return clean(product.productName ?? product.title ?? product.name);
 }
@@ -60,14 +65,21 @@ export function buildAmazonSearchQuery(product) {
 }
 
 function scoreCandidate(product, candidate) {
-  const sourceTokens = tokenSet(`${productBrand(product)} ${productName(product)} ${clean(product.packageSize)}`);
+  const sourceUpc = normalizedUpc(product.upc ?? product.UPC ?? product.gtin);
+  const candidateUpc = normalizedUpc(candidate.upc ?? candidate.UPC ?? candidate.gtin);
+  if (sourceUpc && candidateUpc) return sourceUpc === candidateUpc ? 100 : 0;
+
+  const sourceBrand = productBrand(product);
+  if (sourceBrand && !normalized(candidate.title).includes(normalized(sourceBrand))) return 0;
+
+  const sourceTokens = tokenSet(`${sourceBrand} ${productName(product)} ${clean(product.packageSize)}`);
   const titleTokens = tokenSet(candidate.title);
   if (!sourceTokens.size || !titleTokens.size) return 0;
   let shared = 0;
   for (const token of sourceTokens) if (titleTokens.has(token)) shared += 1;
-  const brandBoost = productBrand(product) && normalized(candidate.title).includes(normalized(productBrand(product))) ? 25 : 0;
+  const brandBoost = sourceBrand ? 25 : 0;
   const packageBoost = clean(product.packageSize) && normalized(candidate.title).includes(normalized(product.packageSize)) ? 15 : 0;
-  return Math.round((shared / sourceTokens.size) * 60 + brandBoost + packageBoost);
+  return Math.min(100, Math.round((shared / sourceTokens.size) * 60 + brandBoost + packageBoost));
 }
 
 export function extractAsinFromUrl(url) {
@@ -110,7 +122,8 @@ export function parseAmazonProductPage(html, url = '') {
   const brand = stripHtml(decodeHtml(page.match(/(?:id="bylineInfo"[^>]*>|Brand:\s*<\/[^>]+>\s*<[^>]+>)([\s\S]*?)<\/[^>]+>/i)?.[1] ?? '')) || null;
   const price = stripHtml(decodeHtml(page.match(/class="[^"]*(?:a-price-whole|priceToPay|apexPriceToPay)[^"]*"[\s\S]*?<span[^>]*class="a-offscreen"[^>]*>([^<]+)<\/span>/i)?.[1] ?? page.match(/class="a-offscreen"[^>]*>(\$[0-9,.]+)/i)?.[1] ?? '')) || null;
   const packageSize = stripHtml(decodeHtml(page.match(/(?:Size|Package Quantity|Unit Count)<\/[^>]+>\s*<[^>]+>([\s\S]*?)<\/[^>]+>/i)?.[1] ?? title.match(/\b\d+(?:\.\d+)?\s?(?:oz|fl oz|ounce|count|ct|pack|pk|lb|pound|g|gram|ml|l)\b/i)?.[0] ?? '')) || null;
-  return { asin, title: title || null, brand, currentPrice: price, packageSize };
+  const upc = page.match(/\b(?:UPC|GTIN|EAN)\s*[:#-]?\s*([0-9-]{8,14})\b/i)?.[1]?.replace(/\D/g, '') ?? null;
+  return { asin, title: title || null, brand, currentPrice: price, packageSize, upc };
 }
 
 export function selectBestAmazonCandidate(product, candidates) {
@@ -144,8 +157,25 @@ export async function discoverAmazonProduct(product, { fetchText, page, minimumM
     };
   }
   const productHtml = await readPageText(bestCandidate.productUrl, { kind: 'product', product, candidate: bestCandidate });
-  const amazonProduct = { ...bestCandidate, ...parseAmazonProductPage(productHtml, bestCandidate.productUrl) };
-  return { sourceProduct: product, searchQuery, searchUrl, matched: Boolean(amazonProduct.asin), matchScore: bestCandidate.matchScore, amazonProduct };
+  const parsedProduct = parseAmazonProductPage(productHtml, bestCandidate.productUrl);
+  const productPageScore = scoreCandidate(product, parsedProduct);
+  const asinMatches = Boolean(parsedProduct.asin) && parsedProduct.asin === bestCandidate.asin;
+  if (!asinMatches || productPageScore < minimumMatchScore) {
+    return {
+      sourceProduct: product,
+      searchQuery,
+      searchUrl,
+      matched: false,
+      matchScore: productPageScore,
+      amazonProduct: null,
+      candidates: [bestCandidate],
+      rejectionReason: !asinMatches
+        ? `Opened Amazon ASIN ${parsedProduct.asin ?? 'unknown'} does not match selected ASIN ${bestCandidate.asin}`
+        : `Opened Amazon product match score ${productPageScore} is below minimum ${minimumMatchScore}`
+    };
+  }
+  const amazonProduct = { ...bestCandidate, ...parsedProduct, matchScore: productPageScore };
+  return { sourceProduct: product, searchQuery, searchUrl, matched: true, matchScore: productPageScore, amazonProduct };
 }
 
 export async function readRevsellerForDiscoveredAmazonProduct(page, { screenshotPath = defaultRevsellerUnavailableScreenshotPath, htmlPath = defaultRevsellerUnavailableHtmlPath, panelTextPath, frameDebugPath } = {}) {
