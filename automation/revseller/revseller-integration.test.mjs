@@ -180,3 +180,30 @@ test('extracts current RevSeller layout from visible frame text', () => {
   assert.equal(result.bsr, '252,958');
   assert.equal(result.category, 'Toys & Games');
 });
+
+
+test('rejects RevSeller interface labels that are not actual numeric values', () => {
+  const liveText = 'Rstr 86,769 in Health & Household 1.10% 30d Sales -- Low FBA $19.29 Buy Box $20.49 Sell Price Buy Cost Min Sell Margin Hazmat Variation Position';
+  const result = extractRevsellerFields({
+    panelText: liveText,
+    panelFound: true,
+    fields: {
+      sellingPrice: 'Buy Cost',
+      fbaFees: 'To estimate fees, the extension needs sell price, weight and dimensions.',
+      estimatedProfit: 'Min SellSell',
+      roi: 'Margin',
+      hazmatWarning: 'Hazmat',
+      variation: 'Position'
+    }
+  });
+
+  assert.equal(result.sellingPrice, '$20.49');
+  assert.equal(result.currentAmazonPrice, 20.49);
+  assert.equal(result.fbaFees, null);
+  assert.equal(result.estimatedProfit, null);
+  assert.equal(result.roi, null);
+  assert.equal(result.bsr, '86,769');
+  assert.equal(result.category, 'Health & Household');
+  assert.equal(result.hazmatWarning, null);
+  assert.equal(result.variation, null);
+});

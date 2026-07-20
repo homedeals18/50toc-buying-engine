@@ -251,3 +251,34 @@ test('discoverAmazonProduct rejects weak title overlap without opening the produ
   assert.match(discovery.rejectionReason, /below minimum 60/);
   assert.equal(visited.length, 1);
 });
+
+
+test('rejects a redirected product page whose ASIN and title do not match the selected result', async () => {
+  const redirectedHtml = `
+    <html><body>
+      <input name="ASIN" value="B004Z2484S" />
+      <span id="productTitle">Colgate Cavity Protection Fluoride Toothpaste 5 Tubes</span>
+    </body></html>
+  `;
+  const discovery = await discoverAmazonProduct(
+    { brand: 'Acme', productName: 'Protein Bars Chocolate', packageSize: '24 ct' },
+    { fetchText: async (url) => (url.includes('/s?') ? searchHtml : redirectedHtml) }
+  );
+
+  assert.equal(discovery.matched, false);
+  assert.equal(discovery.amazonProduct, null);
+  assert.equal(discovery.matchScore, 0);
+  assert.match(discovery.rejectionReason, /does not match selected ASIN/);
+});
+
+test('uses exact UPC before title similarity and rejects a UPC mismatch', () => {
+  const exact = selectBestAmazonCandidate(
+    { upc: '0012345678905', brand: 'Acme', productName: 'Original Product' },
+    [
+      { asin: 'B000WRONG1', title: 'Acme Original Product', upc: '0099999999999' },
+      { asin: 'B000RIGHT2', title: 'Different Listing Words', upc: '0012345678905' }
+    ]
+  );
+  assert.equal(exact.asin, 'B000RIGHT2');
+  assert.equal(exact.matchScore, 100);
+});
