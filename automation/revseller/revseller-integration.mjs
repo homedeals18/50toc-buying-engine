@@ -87,12 +87,16 @@ function textFromVisibleTextCandidates(visibleTextCandidates = []) {
 }
 
 function rawPanelTextFromPanel(panel = {}) {
-  return String(firstNonEmpty(
+  const candidates = [
     panel.panelText,
     textFromVisibleTextCandidates(panel.diagnostics?.visibleTextCandidates),
-    textFromVisibleTextCandidates(panel.frameDebug?.[0]?.diagnostics?.visibleTextCandidates),
+    ...((panel.frameDebug ?? []).map((entry) => textFromVisibleTextCandidates(entry?.diagnostics?.visibleTextCandidates))),
     textFromVisibleTextCandidates(panel.visibleTextCandidates)
-  ) ?? '');
+  ].map((value) => String(value ?? '').trim()).filter(Boolean);
+
+  const signalPattern = /\b(?:Sell Price|Buy Box|Low FBA|FBA Fees?|ROI|Rstr|BSR|30d Sales|90d Rank|Max Cost)\b/gi;
+  const score = (value) => (value.match(signalPattern)?.length ?? 0) * 10_000 + value.length;
+  return candidates.sort((left, right) => score(right) - score(left))[0] ?? '';
 }
 
 function hasExtractedRevsellerValues(data) {
@@ -103,7 +107,13 @@ export function extractRevsellerFields({ panelText, asin, productTitle, productU
   const text = rawPanelTextFromPanel({ panelText, diagnostics, frameDebug, visibleTextCandidates });
   const found = panelFound ?? Boolean(text.trim() || Object.values(fields).some((value) => String(value ?? '').trim()));
   const extractedAsin = firstNonEmpty(fields.asin, valueAfterLabel(text, 'ASIN'), text.match(/\b[A-Z0-9]{10}\b/)?.[0], asin);
-  const priceText = firstNonEmpty(fields.sellingPrice, fields.currentAmazonPrice, valueAfterLabel(text, '(?:Selling Price|Sell Price|Current Amazon Price|Amazon Price|Price)'));
+  const priceText = firstNonEmpty(
+    fields.sellingPrice,
+    fields.currentAmazonPrice,
+    text.match(/\bBuy Box\s+(\$[0-9,.]+)/i)?.[1],
+    text.match(/\bLow FBA\s+(\$[0-9,.]+)/i)?.[1],
+    valueAfterLabel(text, '(?:Selling Price|Sell Price|Current Amazon Price|Amazon Price|Price)')
+  );
   const feeText = firstNonEmpty(fields.fbaFees, valueAfterLabel(text, '(?:FBA Fees?|Fees?)'));
   const profitText = firstNonEmpty(fields.estimatedProfit, valueAfterLabel(text, '(?:Estimated Profit|Est\\.? Profit|Net Profit|Profit)'));
   const roiText = firstNonEmpty(fields.roi, valueAfterLabel(text, 'ROI'));
@@ -119,8 +129,8 @@ export function extractRevsellerFields({ panelText, asin, productTitle, productU
     fbaFees: feeText || null,
     estimatedProfit: profitText || null,
     roi: roiText || null,
-    bsr: firstNonEmpty(fields.bsr, valueAfterLabel(text, '(?:BSR|Best Sellers Rank|Sales Rank|Rank)')),
-    category: firstNonEmpty(fields.category, valueAfterLabel(text, 'Category')),
+    bsr: firstNonEmpty(fields.bsr, text.match(/\bRstr\s+([0-9,]+)/i)?.[1], valueAfterLabel(text, '(?:BSR|Best Sellers Rank|Sales Rank|Rank)')),
+    category: firstNonEmpty(fields.category, text.match(/\bRstr\s+[0-9,]+\s+in\s+(.+?)\s+[0-9]+(?:\.[0-9]+)?%\s+30d Sales/i)?.[1], valueAfterLabel(text, 'Category')),
     hazmatWarning: hazmatText || null,
     meltableWarning: meltableText || null,
     ipRestrictionWarnings: ipText || null,
