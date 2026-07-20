@@ -2,6 +2,9 @@ const wantedCategoryPattern = /grocery|snacks?|candy|cookies?|crackers?|nuts?|be
 
 const rejectedDepartmentPattern = /\b(appliances?|kitchen[\s_-]+appliances?|home[\s_-]+appliances?|cookers?|slow[\s_-]+cookers?|multi[\s_-]+cookers?|blenders?|microwaves?|air[\s_-]+fryers?|air[\s_-]+purifiers?|toasters?|vacuums?|fans?|heaters?|refrigerators?|fridges?|mini[\s_-]+fridges?|freezers?|washers?|dryers?|coffee[\s_-]+makers?|mattress(?:es)?|sofas?|sectionals?|recliners?|chairs?|furniture|batter(?:y|ies)|electronics?|airpods|headphones?|nintendo|video[\s_-]+games?|consoles?|gaming|t\.?v\.?s?|televisions?|soundbars?|audio|patio[\s_-]+dining|patio|garden|outdoor[\s_-]+play|outdoor[\s_-]+furniture|outdoor|gazebos?|pergolas?|grill[\s_-]+accessor(?:y|ies)|grills?|spatulas?|deck[\s_-]+tiles?|dining[\s_-]+sets?|seating[\s_-]+sets?|lawn[\s_-]+games?|lawn[\s_-]+equipment|lawn|badminton|volleyball|power[\s_-]+equipment|toys?|clothing|apparel|automotive|seasonal[\s_-]+decorations?|seasonal|home[\s_-]+decor|jewelry|office[\s_-]+furniture|office|sporting[\s_-]+goods|books?|tires?)\b/i;
 
+const rejectedBrandPattern = /\bberkley\s+jensen\b/i;
+const rejectedHousewaresPattern = /\b(?:paper\s+plates?|dinner\s+plates?|oval\s+plates?|napkins?|food\s+storage|storage\s+(?:containers?|boxes?|bins?|totes?)|meal\s+prep\s+(?:sets?|containers?)|cookware|folding\s+tray|beverage\s+dispenser|water\s+bottles?|travel\s+mugs?|tumblers?|baby\s+bottles?|bassinets?|bumper\s+jumper|citrus\s+juicer|canopy\s+weights?|shelves|shelving|buckets?|hangers?|pillows?|dehumidifiers?|air\s+conditioners?|air\s+circulators?|kayaks?|pickleball|bath\s+rugs?|luggage|hardside\s+sets?|softside\s+luggage|suitcases?|backpacks?|smoke\s+(?:and\s+carbon\s+monoxide\s+)?alarms?|reusable\s+ice\s+blocks?|led\s+lights?|steel\s+racks?|gift\s+cards?)\b/i;
+
 const rejectedVarietyPattern = /\b(variety(?:\s+pack)?|assorted|assortment|mixed\s+(?:pack|variety|flavo[u]?r)|multi\s+flavo[u]?r|flavo[u]?r\s+variety|sampler)\b/i;
 
 const frozenChilledPattern = /\b(frozen|refrigerated|chilled|meat|seafood|fish|dairy|produce|fresh fruit|fresh vegetables?|avocados?(?!\s+(?:oil|chips?|snacks?))|cherries|nectarines|seedless watermelon|organic bananas|fresh gourmet carrots|seedless green grapes|vidalia sweet onions|organic baby cut carrots|grape tomatoes|english seedless cucumbers|simply lemonade)\b/i;
@@ -48,6 +51,14 @@ export function listingFilterText(product = {}) {
 
 export function evaluateListingProduct(product = {}) {
   const category = compact(product.category);
+  const brandMatch = firstSignalMatch(product, rejectedBrandPattern);
+  if (brandMatch) {
+    return { accepted: false, reason: 'rejected-brand', ...brandMatch };
+  }
+  const housewaresMatch = firstSignalMatch(product, rejectedHousewaresPattern);
+  if (housewaresMatch) {
+    return { accepted: false, reason: 'rejected-housewares', ...housewaresMatch };
+  }
   const varietyMatch = firstSignalMatch(product, rejectedVarietyPattern);
   if (varietyMatch) {
     return { accepted: false, reason: 'rejected-variety-assorted-sampler', ...varietyMatch };
@@ -72,7 +83,8 @@ export function listingProductAllowed(product = {}) {
 
 export function categoryAllowed(product = {}) {
   const category = compact(product.category);
-  const productText = compact([product.productName, category].filter(Boolean).join(' '));
+  const productText = compact([product.productName, product.brand, category].filter(Boolean).join(' '));
+  if (rejectedBrandPattern.test(productText) || rejectedHousewaresPattern.test(productText)) return false;
   if (frozenChilledPattern.test(productText) || repairOnlyRejectedNamePattern.test(productText)) return false;
   if (!category) return true;
   return wantedCategoryPattern.test(category) && !rejectedDepartmentPattern.test(category);
