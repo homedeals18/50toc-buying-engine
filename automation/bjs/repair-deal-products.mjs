@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { categoryAllowed, mergeDuplicateProducts } from './deal-filter.js';
 import { normalizeBjsPrice } from './price-utils.mjs';
 import { runBuyingPipeline, writeCombinedShoppingListReport } from '../shared/buying-engine.js';
+import { sanitizeProductBrand } from '../shared/product-brand.mjs';
 
 const automationDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(automationDir, '../..');
@@ -18,8 +19,10 @@ if (!Array.isArray(saved)) throw new Error('BJ\'s deal-products.json must contai
 
 await copyFile(productsPath, backupPath);
 
+const invalidBrandsRemoved = saved.filter((product) => product.brand && !sanitizeProductBrand(product.brand)).length;
 const normalized = saved.map((product) => ({
   ...product,
+  brand: sanitizeProductBrand(product.brand),
   currentPrice: normalizeBjsPrice(product.currentPrice),
   originalPrice: normalizeBjsPrice(product.originalPrice)
 })).filter(categoryAllowed);
@@ -34,6 +37,7 @@ console.log(JSON.stringify({
   after: evaluated.length,
   removedByRules: saved.length - normalized.length,
   duplicatesMerged: deduped.duplicatesMerged,
+  invalidBrandsRemoved,
   missingCurrentPrice: evaluated.filter((product) => !product.currentPrice).length,
   missingOriginalPrice: evaluated.filter((product) => !product.originalPrice).length,
   backup: backupPath
