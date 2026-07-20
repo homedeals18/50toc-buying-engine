@@ -60,7 +60,12 @@ export function extractGtinCandidatesNearIdentity(text, identities = []) {
   for (const identity of normalizedIdentities) {
     let index = source.toLowerCase().indexOf(identity.toLowerCase());
     while (index >= 0) {
-      windows.push(source.slice(Math.max(0, index - 2500), Math.min(source.length, index + identity.length + 2500)));
+      const objectStart = source.lastIndexOf('{', index);
+      const objectEnd = source.indexOf('}', index + identity.length);
+      const hasNearbyObject = objectStart >= 0 && objectEnd >= 0 && objectEnd - objectStart <= 5_000;
+      windows.push(hasNearbyObject
+        ? source.slice(objectStart, objectEnd + 1)
+        : source.slice(Math.max(0, index - 750), Math.min(source.length, index + identity.length + 750)));
       index = source.toLowerCase().indexOf(identity.toLowerCase(), index + identity.length);
     }
   }
