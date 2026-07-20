@@ -170,7 +170,28 @@ function valueAfterLabel(text, labelPattern) {
   return match?.[1]?.trim() || null;
 }
 
-, 'i').test(cleaned)) return null;
+function firstNonEmpty(...values) {
+  return values.find((value) => String(value ?? '').trim()) ?? null;
+}
+
+function firstValid(predicate, ...values) {
+  return values.find((value) => String(value ?? '').trim() && predicate(String(value).trim())) ?? null;
+}
+
+function isMoneyValue(value) {
+  return /-?\$\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?/.test(String(value ?? ''));
+}
+
+function isPercentValue(value) {
+  return /-?\s*[0-9]+(?:\.[0-9]+)?\s*%/.test(String(value ?? ''));
+}
+
+function meaningfulWarning(value, labels) {
+  const cleaned = String(value ?? '').trim();
+  const ignored = ['position', ...(Array.isArray(labels) ? labels : [labels])]
+    .map((label) => String(label ?? '').trim().toLowerCase())
+    .filter(Boolean);
+  if (!cleaned || ignored.includes(cleaned.toLowerCase())) return null;
   return cleaned;
 }
 
@@ -215,7 +236,7 @@ export function extractRevsellerFields({ panelText, asin, productTitle, productU
   const roiText = firstValid(isPercentValue, valueAfterLabel(text, 'ROI'), fields.roi);
   const hazmatText = meaningfulWarning(firstNonEmpty(valueAfterLabel(text, 'Hazmat'), fields.hazmatWarning), 'hazmat');
   const meltableText = meaningfulWarning(firstNonEmpty(valueAfterLabel(text, 'Meltable'), fields.meltableWarning), 'meltable');
-  const ipText = meaningfulWarning(firstNonEmpty(valueAfterLabel(text, '(?:IP / Restriction warnings?|IP Alert|IP Warning|Restriction warnings?|Restrictions?)'), fields.ipRestrictionWarnings), '(?:ip|ip alert|ip warning|restrictions?)');
+  const ipText = meaningfulWarning(firstNonEmpty(valueAfterLabel(text, '(?:IP / Restriction warnings?|IP Alert|IP Warning|Restriction warnings?|Restrictions?)'), fields.ipRestrictionWarnings), ['ip', 'ip alert', 'ip warning', 'restriction', 'restrictions']);
   return {
     asin: extractedAsin,
     productTitle: firstNonEmpty(fields.productTitle, valueAfterLabel(text, '(?:Product Title|Title)'), productTitle),
