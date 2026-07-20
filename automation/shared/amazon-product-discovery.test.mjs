@@ -299,7 +299,7 @@ test('Amazon search query omits polluted BJ brand text', () => {
     productName: 'Artstyle Lemon Twist Summer 12" Oval Plates, 50 ct.',
     packageSize: '50 ct'
   });
-  assert.equal(query, 'Artstyle Lemon Twist Summer 12" Oval Plates, 50 ct. 50 ct');
+  assert.equal(query, 'Artstyle Lemon Twist Summer 12" Oval Plates, 50 ct.');
   assert.doesNotMatch(query, /Recipes|Coupons|Shopping Locations/);
 });
 
@@ -340,5 +340,14 @@ test('Amazon query recovers package size from the store product name', () => {
     productName: 'NUK Simply Natural Bottles with SafeTemp 12-Pc. Gift Set',
     packageSize: null
   });
-  assert.match(query, /12 pc$/);
+  assert.equal(query, 'NUK Simply Natural Bottles with SafeTemp 12-Pc. Gift Set');
+});
+
+
+test('does not duplicate a combined package size already present in the product name', () => {
+  const query = buildAmazonSearchQuery({
+    productName: 'Lotus Biscoff Cookies, 32 ct./2 pk.',
+    packageSize: '32 ct / 2 pk'
+  });
+  assert.equal(query, 'Lotus Biscoff Cookies, 32 ct./2 pk.');
 });
