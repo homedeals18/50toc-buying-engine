@@ -117,7 +117,7 @@ function extractMeta(html, property) {
 
 export function parseAmazonProductPage(html, url = '') {
   const page = String(html ?? '');
-  const asin = extractAsinFromUrl(url) ?? page.match(/(?:data-asin|name="ASIN"|id="ASIN")=["']([A-Z0-9]{10})["']/i)?.[1]?.toUpperCase() ?? null;
+  const asin = page.match(/(?:data-asin|name="ASIN"|id="ASIN")=["']([A-Z0-9]{10})["']/i)?.[1]?.toUpperCase() ?? extractAsinFromUrl(url) ?? null;
   const title = stripHtml(decodeHtml(page.match(/id="productTitle"[^>]*>([\s\S]*?)<\/[^>]+>/i)?.[1] ?? extractMeta(page, 'og:title')));
   const brand = stripHtml(decodeHtml(page.match(/(?:id="bylineInfo"[^>]*>|Brand:\s*<\/[^>]+>\s*<[^>]+>)([\s\S]*?)<\/[^>]+>/i)?.[1] ?? '')) || null;
   const price = stripHtml(decodeHtml(page.match(/class="[^"]*(?:a-price-whole|priceToPay|apexPriceToPay)[^"]*"[\s\S]*?<span[^>]*class="a-offscreen"[^>]*>([^<]+)<\/span>/i)?.[1] ?? page.match(/class="a-offscreen"[^>]*>(\$[0-9,.]+)/i)?.[1] ?? '')) || null;
