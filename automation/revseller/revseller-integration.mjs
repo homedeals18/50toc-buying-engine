@@ -64,7 +64,8 @@ const revsellerFieldLabels = [
 ];
 
 function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const specialCharacters = '\\\\^$.*+?()[]{}|';
+  return [...String(value)].map((character) => specialCharacters.includes(character) ? '\\\\' + character : character).join('');
 }
 
 function valueAfterLabel(text, labelPattern) {
