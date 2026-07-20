@@ -50,6 +50,28 @@ function productJsonCandidates(jsonLd, product) {
   return extractGtinCandidatesFromObject(matching.length ? matching : products.slice(0, 1));
 }
 
+async function expandSpecifications(page) {
+  const controls = page.locator('button, [role="button"], summary').filter({ hasText: /^\s*(?:Specifications|Product Specifications|Item Specifications)\s*$/i });
+  const count = Math.min(await controls.count(), 5);
+  for (let index = 0; index < count; index += 1) {
+    const control = controls.nth(index);
+    if (!await control.isVisible().catch(() => false)) continue;
+    const expanded = await control.getAttribute('aria-expanded').catch(() => null);
+    if (expanded !== 'true') await control.click({ timeout: 5_000 }).catch(() => undefined);
+    await page.waitForTimeout(500);
+    return true;
+  }
+
+  return page.evaluate(() => {
+    const candidates = [...document.querySelectorAll('button, [role="button"], summary, h2, h3, h4')];
+    const label = candidates.find((element) => /^\s*(?:Specifications|Product Specifications|Item Specifications)\s*$/i.test(element.textContent || ''));
+    const clickable = label?.closest('button, [role="button"], summary') || label?.parentElement;
+    if (!clickable) return false;
+    clickable.click();
+    return true;
+  }).catch(() => false);
+}
+
 async function collectDomCandidates(page, product) {
   const payload = await page.evaluate(({ sku }) => {
     const jsonLd = [...document.querySelectorAll('script[type="application/ld+json"]')].map((node) => node.textContent || '');
@@ -122,6 +144,8 @@ async function main() {
     try {
       await page.goto(product.productUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
       await sleep(delayMs);
+      const specificationsExpanded = await expandSpecifications(page);
+      if (specificationsExpanded) await sleep(750);
       await Promise.allSettled(activeCapture.tasks);
       const domCandidates = await collectDomCandidates(page, product);
       const networkCandidates = activeCapture.texts.flatMap((text) =>
@@ -139,7 +163,7 @@ async function main() {
       } else {
         run.notFound += 1;
       }
-      const result = { key, sku: product.sku ?? null, productName: product.productName, productUrl: product.productUrl, status, candidates };
+      const result = { key, sku: product.sku ?? null, productName: product.productName, productUrl: product.productUrl, specificationsExpanded, status, candidates };
       progress.products[key] = { ...result, checkedAt: new Date().toISOString() };
       run.results.push(result);
       await writeJsonAtomic(productsPath, products);
