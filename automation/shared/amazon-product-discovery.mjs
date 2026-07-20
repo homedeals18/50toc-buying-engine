@@ -6,6 +6,7 @@ import { getAmazonBrowserPage } from '../amazon/browser-session/index.mjs';
 import { detectRevsellerPanel, extractRevsellerFields, readRevsellerPanel, revsellerFieldsFound, saveRevsellerFrameDebugArtifact, saveRevsellerNotVisibleArtifacts, saveRevsellerPanelArtifacts, saveRevsellerPanelTextArtifact, writeRevsellerAnalysisReport } from '../revseller/revseller-integration.mjs';
 import { runStandardizedModule, toProjectRelativePath } from './module-interface.mjs';
 import { sanitizeProductBrand } from './product-brand.mjs';
+import { extractPackageSize, normalizePackageSize } from './product-package.mjs';
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const defaultProductDiscoveryPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'product-discovery.json');
@@ -61,8 +62,12 @@ function productBrand(product) {
   return sanitizeProductBrand(product.brand) ?? '';
 }
 
+function productPackageSize(product) {
+  return extractPackageSize(productName(product)) ?? normalizePackageSize(product.packageSize) ?? '';
+}
+
 export function buildAmazonSearchQuery(product) {
-  return [productBrand(product), productName(product), clean(product.packageSize)].filter(Boolean).join(' ');
+  return [productBrand(product), productName(product), productPackageSize(product)].filter(Boolean).join(' ');
 }
 
 function scoreCandidate(product, candidate) {
@@ -73,13 +78,14 @@ function scoreCandidate(product, candidate) {
   const sourceBrand = productBrand(product);
   if (sourceBrand && !normalized(candidate.title).includes(normalized(sourceBrand))) return 0;
 
-  const sourceTokens = tokenSet(`${sourceBrand} ${productName(product)} ${clean(product.packageSize)}`);
+  const sourcePackageSize = productPackageSize(product);
+  const sourceTokens = tokenSet(`${sourceBrand} ${productName(product)} ${sourcePackageSize}`);
   const titleTokens = tokenSet(candidate.title);
   if (!sourceTokens.size || !titleTokens.size) return 0;
   let shared = 0;
   for (const token of sourceTokens) if (titleTokens.has(token)) shared += 1;
   const brandBoost = sourceBrand ? 25 : 0;
-  const packageBoost = clean(product.packageSize) && normalized(candidate.title).includes(normalized(product.packageSize)) ? 15 : 0;
+  const packageBoost = sourcePackageSize && normalized(candidate.title).includes(normalized(sourcePackageSize)) ? 15 : 0;
   return Math.min(100, Math.round((shared / sourceTokens.size) * 60 + brandBoost + packageBoost));
 }
 
@@ -122,7 +128,7 @@ export function parseAmazonProductPage(html, url = '') {
   const title = stripHtml(decodeHtml(page.match(/id="productTitle"[^>]*>([\s\S]*?)<\/[^>]+>/i)?.[1] ?? extractMeta(page, 'og:title')));
   const brand = stripHtml(decodeHtml(page.match(/(?:id="bylineInfo"[^>]*>|Brand:\s*<\/[^>]+>\s*<[^>]+>)([\s\S]*?)<\/[^>]+>/i)?.[1] ?? '')) || null;
   const price = stripHtml(decodeHtml(page.match(/class="[^"]*(?:a-price-whole|priceToPay|apexPriceToPay)[^"]*"[\s\S]*?<span[^>]*class="a-offscreen"[^>]*>([^<]+)<\/span>/i)?.[1] ?? page.match(/class="a-offscreen"[^>]*>(\$[0-9,.]+)/i)?.[1] ?? '')) || null;
-  const packageSize = stripHtml(decodeHtml(page.match(/(?:Size|Package Quantity|Unit Count)<\/[^>]+>\s*<[^>]+>([\s\S]*?)<\/[^>]+>/i)?.[1] ?? title.match(/\b\d+(?:\.\d+)?\s?(?:oz|fl oz|ounce|count|ct|pack|pk|lb|pound|g|gram|ml|l)\b/i)?.[0] ?? '')) || null;
+  const packageSize = extractPackageSize(title) ?? normalizePackageSize(stripHtml(decodeHtml(page.match(/(?:Size|Package Quantity|Unit Count)<\/[^>]+>\s*<[^>]+>([\s\S]*?)<\/[^>]+>/i)?.[1] ?? '')));
   const upc = page.match(/\b(?:UPC|GTIN|EAN)\s*[:#-]?\s*([0-9-]{8,14})\b/i)?.[1]?.replace(/\D/g, '') ?? null;
   return { asin, title: title || null, brand, currentPrice: price, packageSize, upc };
 }
@@ -178,7 +184,7 @@ export async function discoverAmazonProduct(product, { fetchText, page, minimumM
   const hasStrongIdentitySignal = Boolean(
     normalizedUpc(product.upc ?? product.UPC ?? product.gtin)
     || productBrand(product)
-    || clean(product.packageSize)
+    || productPackageSize(product)
   );
   if (!hasStrongIdentitySignal) {
     return {
