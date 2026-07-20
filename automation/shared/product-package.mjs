@@ -12,6 +12,8 @@ function canonicalUnit(value) {
   if (/^(?:lb|lbs|pound|pounds)$/.test(unit)) return 'lb';
   if (/^(?:gal|gallon|gallons)$/.test(unit)) return 'gal';
   if (/^(?:qt|quart|quarts)$/.test(unit)) return 'qt';
+  if (/^(?:g|gram|grams)$/.test(unit)) return 'g';
+  if (/^(?:kg|kilogram|kilograms)$/.test(unit)) return 'kg';
   if (/^(?:ml|milliliter|milliliters)$/.test(unit)) return 'ml';
   if (/^(?:l|liter|liters)$/.test(unit)) return 'L';
   return unit;
@@ -20,7 +22,7 @@ function canonicalUnit(value) {
 export function extractPackageSize(value) {
   const text = clean(value);
   if (!text) return null;
-  const pattern = /\b(\d+(?:\.\d+)?)\s*[-/]?\s*(fl\.?\s*oz|fluid\s*ounces?|oz|ounces?|ct|count|pk|pack|pcs?|pieces?|lbs?|pounds?|gallons?|gal|quarts?|qt|milliliters?|ml|liters?|l)\.?\b/gi;
+  const pattern = /\b(\d+(?:\.\d+)?)\s*[-/]?\s*(fl\.?\s*oz|fluid\s*ounces?|oz|ounces?|ct|count|pk|pack|pcs?|pieces?|lbs?|pounds?|gallons?|gal|quarts?|qt|grams?|g|kilograms?|kg|milliliters?|ml|liters?|l)\.?\b/gi;
   const matches = [...text.matchAll(pattern)].map((match) => `${match[1]} ${canonicalUnit(match[2])}`);
   return [...new Set(matches)].join(' / ') || null;
 }
