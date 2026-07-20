@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { runBuyingPipeline, writeCombinedShoppingListReport } from '../../shared/buying-engine.js';
 import { sanitizeProductBrand } from '../../shared/product-brand.mjs';
+import { extractPackageSize, normalizePackageSize } from '../../shared/product-package.mjs';
 import { categoryAllowed, evaluateListingProduct, listingProductAllowed, mergeDuplicateProducts, normalizeProductUrl, productIdentity } from '../deal-filter.js';
 import { normalizeBjsPrice } from '../price-utils.mjs';
 
@@ -563,7 +564,11 @@ async function enrichProductFromPage(page, listingProduct, index) {
   });
 
   const mergedProduct = { ...listingProduct, ...Object.fromEntries(Object.entries(details).filter(([, value]) => value)) };
-  return unifiedDeal({ ...mergedProduct, brand: sanitizeProductBrand(mergedProduct.brand) });
+  return unifiedDeal({
+    ...mergedProduct,
+    brand: sanitizeProductBrand(mergedProduct.brand),
+    packageSize: extractPackageSize(mergedProduct.productName) ?? normalizePackageSize(mergedProduct.packageSize)
+  });
 }
 
 
