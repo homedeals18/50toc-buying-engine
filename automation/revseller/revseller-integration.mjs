@@ -79,6 +79,101 @@ function firstNonEmpty(...values) {
   return values.find((value) => String(value ?? '').trim()) ?? null;
 }
 
+function firstValid(predicate, ...values) {
+  return values.find((value) => String(value ?? '').trim() && predicate(String(value).trim())) ?? null;
+}
+
+function isMoneyValue(value) {
+  return /-?\$\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?/.test(String(value ?? ''));
+}
+
+function isPercentValue(value) {
+  return /-?\s*[0-9]+(?:\.[0-9]+)?\s*%/.test(String(value ?? ''));
+}
+
+function meaningfulWarning(value, label) {
+  const cleaned = String(value ?? '').trim();
+  if (!cleaned || new RegExp(`^(?:${label}|position)import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { redactSensitiveText } from './connector-config.mjs';
+import { confidenceRules, matchProductToAmazon } from '../shared/amazon-matching-engine.mjs';
+
+export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+export const amazonArtifactRoot = path.join(repositoryRoot, 'artifacts', 'amazon');
+export const amazonAnalysisReportPath = path.join(amazonArtifactRoot, 'revseller-analysis-report.json');
+export const revsellerArtifactRoot = path.join(repositoryRoot, 'artifacts', 'revseller');
+export const revsellerReaderReportPath = path.join(revsellerArtifactRoot, 'revseller-analysis-report.json');
+export const revsellerMissingScreenshotPath = path.join(revsellerArtifactRoot, 'revseller-panel-not-visible.png');
+export const revsellerMissingHtmlPath = path.join(revsellerArtifactRoot, 'revseller-panel-not-visible.html');
+export const revsellerFieldsMissingScreenshotPath = path.join(revsellerArtifactRoot, 'revseller-panel-fields-missing.png');
+export const revsellerFieldsMissingHtmlPath = path.join(revsellerArtifactRoot, 'revseller-panel-fields-missing.html');
+export const amazonRevsellerFrameDebugPath = path.join(amazonArtifactRoot, 'revseller-frame-debug.json');
+export const amazonRevsellerPanelTextPath = path.join(amazonArtifactRoot, 'revseller-panel-text.txt');
+export const revsellerPanelTextPath = amazonRevsellerPanelTextPath;
+export const revsellerRootHtmlPath = path.join(revsellerArtifactRoot, 'revseller-root.html');
+export const revsellerRootTextPath = path.join(revsellerArtifactRoot, 'revseller-root-text.txt');
+export const revsellerRootCandidatesPath = path.join(revsellerArtifactRoot, 'revseller-root-candidates.json');
+
+export function parseMoney(value) {
+  const match = String(value ?? '').match(/-?\$?\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)/);
+  return match ? Number(match[1].replaceAll(',', '')) : null;
+}
+
+export function parsePercent(value) {
+  const match = String(value ?? '').match(/-?\s*([0-9]+(?:\.[0-9]+)?)\s*%/);
+  return match ? Number(match[1]) : null;
+}
+
+const revsellerFieldLabels = [
+  'ASIN',
+  'Product Title',
+  'Title',
+  'Selling Price',
+  'Sell Price',
+  'Current Amazon Price',
+  'Amazon Price',
+  'Price',
+  'FBA Fees',
+  'FBA Fee',
+  'Fees',
+  'Estimated Profit',
+  'Est. Profit',
+  'Net Profit',
+  'Profit',
+  'ROI',
+  'BSR',
+  'Best Sellers Rank',
+  'Sales Rank',
+  'Rank',
+  'Category',
+  'Hazmat',
+  'Meltable',
+  'IP / Restriction warnings',
+  'IP Alert',
+  'IP Warning',
+  'Restriction warnings',
+  'Restrictions',
+  'Variation'
+];
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function valueAfterLabel(text, labelPattern) {
+  const source = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!source) return null;
+  const nextLabels = revsellerFieldLabels.map(escapeRegExp).join('|');
+  const match = source.match(new RegExp(`(?:${labelPattern})\\s*:?\\s*([^|•\\n]+?)(?=\\s+(?:${nextLabels})\\b|$)`, 'i'));
+  return match?.[1]?.trim() || null;
+}
+
+, 'i').test(cleaned)) return null;
+  return cleaned;
+}
+
 function textFromVisibleTextCandidates(visibleTextCandidates = []) {
   return [...new Set(visibleTextCandidates.flatMap((candidate) => [
     candidate?.text,
@@ -107,19 +202,20 @@ export function extractRevsellerFields({ panelText, asin, productTitle, productU
   const text = rawPanelTextFromPanel({ panelText, diagnostics, frameDebug, visibleTextCandidates });
   const found = panelFound ?? Boolean(text.trim() || Object.values(fields).some((value) => String(value ?? '').trim()));
   const extractedAsin = firstNonEmpty(fields.asin, valueAfterLabel(text, 'ASIN'), text.match(/\b[A-Z0-9]{10}\b/)?.[0], asin);
-  const priceText = firstNonEmpty(
-    fields.sellingPrice,
-    fields.currentAmazonPrice,
+  const priceText = firstValid(
+    isMoneyValue,
     text.match(/\bBuy Box\s+(\$[0-9,.]+)/i)?.[1],
     text.match(/\bLow FBA\s+(\$[0-9,.]+)/i)?.[1],
-    valueAfterLabel(text, '(?:Selling Price|Sell Price|Current Amazon Price|Amazon Price|Price)')
+    valueAfterLabel(text, '(?:Selling Price|Sell Price|Current Amazon Price|Amazon Price|Price)'),
+    fields.sellingPrice,
+    fields.currentAmazonPrice
   );
-  const feeText = firstNonEmpty(fields.fbaFees, valueAfterLabel(text, '(?:FBA Fees?|Fees?)'));
-  const profitText = firstNonEmpty(fields.estimatedProfit, valueAfterLabel(text, '(?:Estimated Profit|Est\\.? Profit|Net Profit|Profit)'));
-  const roiText = firstNonEmpty(fields.roi, valueAfterLabel(text, 'ROI'));
-  const hazmatText = firstNonEmpty(fields.hazmatWarning, valueAfterLabel(text, 'Hazmat'));
-  const meltableText = firstNonEmpty(fields.meltableWarning, valueAfterLabel(text, 'Meltable'));
-  const ipText = firstNonEmpty(fields.ipRestrictionWarnings, valueAfterLabel(text, '(?:IP / Restriction warnings?|IP Alert|IP Warning|Restriction warnings?|Restrictions?)'));
+  const feeText = firstValid(isMoneyValue, valueAfterLabel(text, '(?:FBA Fees?|Fees?)'), fields.fbaFees);
+  const profitText = firstValid(isMoneyValue, valueAfterLabel(text, '(?:Estimated Profit|Est\\.? Profit|Net Profit|Profit)'), fields.estimatedProfit);
+  const roiText = firstValid(isPercentValue, valueAfterLabel(text, 'ROI'), fields.roi);
+  const hazmatText = meaningfulWarning(firstNonEmpty(valueAfterLabel(text, 'Hazmat'), fields.hazmatWarning), 'hazmat');
+  const meltableText = meaningfulWarning(firstNonEmpty(valueAfterLabel(text, 'Meltable'), fields.meltableWarning), 'meltable');
+  const ipText = meaningfulWarning(firstNonEmpty(valueAfterLabel(text, '(?:IP / Restriction warnings?|IP Alert|IP Warning|Restriction warnings?|Restrictions?)'), fields.ipRestrictionWarnings), '(?:ip|ip alert|ip warning|restrictions?)');
   return {
     asin: extractedAsin,
     productTitle: firstNonEmpty(fields.productTitle, valueAfterLabel(text, '(?:Product Title|Title)'), productTitle),
@@ -129,15 +225,15 @@ export function extractRevsellerFields({ panelText, asin, productTitle, productU
     fbaFees: feeText || null,
     estimatedProfit: profitText || null,
     roi: roiText || null,
-    bsr: firstNonEmpty(fields.bsr, text.match(/\bRstr\s+([0-9,]+)/i)?.[1], valueAfterLabel(text, '(?:BSR|Best Sellers Rank|Sales Rank|Rank)')),
-    category: firstNonEmpty(fields.category, text.match(/\bRstr\s+[0-9,]+\s+in\s+(.+?)\s+[0-9]+(?:\.[0-9]+)?%\s+30d Sales/i)?.[1], valueAfterLabel(text, 'Category')),
+    bsr: firstNonEmpty(text.match(/\bRstr\s+([0-9,]+)/i)?.[1], valueAfterLabel(text, '(?:BSR|Best Sellers Rank|Sales Rank|Rank)'), fields.bsr),
+    category: firstNonEmpty(text.match(/\bRstr\s+[0-9,]+\s+in\s+(.+?)\s+[0-9]+(?:\.[0-9]+)?%\s+30d Sales/i)?.[1], valueAfterLabel(text, 'Category'), fields.category),
     hazmatWarning: hazmatText || null,
     meltableWarning: meltableText || null,
     ipRestrictionWarnings: ipText || null,
     hazmat: hazmatText || null,
     meltable: meltableText || null,
     ipAlert: ipText || null,
-    variation: firstNonEmpty(fields.variation, valueAfterLabel(text, 'Variation')),
+    variation: meaningfulWarning(firstNonEmpty(valueAfterLabel(text, 'Variation'), fields.variation), 'variation'),
     revsellerPanelFound: Boolean(found),
     profitabilitySource: found ? 'RevSeller' : null
   };
