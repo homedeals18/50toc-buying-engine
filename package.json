@@ -24,7 +24,8 @@
     "build:review-list": "node automation/review-candidates/revseller-review-list.mjs",
     "scrape:bjs:deals:test": "npm --prefix automation/bjs run scrape:bjs:deals:test",
     "test:bjs:filter": "npm --prefix automation/bjs run unit",
-    "repair:bjs:data": "npm --prefix automation/bjs run repair:data"
+    "repair:bjs:data": "npm --prefix automation/bjs run repair:data",
+    "enrich:bjs:upcs:manual-chrome": "npm --prefix automation/bjs run enrich:upcs:manual-chrome"
   },
   "devDependencies": {
     "playwright": "latest"
