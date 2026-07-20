@@ -101,10 +101,11 @@ async function main() {
     if (!activeCapture || !/bjs\.com/i.test(response.url())) return;
     const contentType = response.headers()['content-type'] ?? '';
     if (!/json|javascript|text/i.test(contentType)) return;
+    const capture = activeCapture;
     const task = response.text()
-      .then((text) => { if (text.length <= 3_000_000) activeCapture?.texts.push(text); })
+      .then((text) => { if (text.length <= 3_000_000) capture.texts.push(text); })
       .catch(() => undefined);
-    activeCapture.tasks.push(task);
+    capture.tasks.push(task);
   });
 
   const run = { startedAt: new Date().toISOString(), attempted: 0, found: 0, notFound: 0, ambiguous: 0, failed: 0, stoppedForAccessDenied: false, results: [] };
