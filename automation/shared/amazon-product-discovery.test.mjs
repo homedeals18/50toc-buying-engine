@@ -231,3 +231,23 @@ test('runAmazonAnalysis saves screenshot, HTML, and structured RevSeller error w
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('discoverAmazonProduct rejects weak title overlap without opening the product page', async () => {
+  const visited = [];
+  const weakSearchHtml = '<div data-asin="B0FY2Z9L12"><h2><span>50 Pcs Capri Lemon Oval Paper Plates Party Decorations</span></h2><a href="/dp/B0FY2Z9L12"></a></div>';
+  const discovery = await discoverAmazonProduct(
+    { productName: 'Artstyle Lemon Twist Summer Oval Plates, 50 ct.', packageSize: '50 ct' },
+    {
+      fetchText: async (url) => {
+        visited.push(url);
+        return weakSearchHtml;
+      }
+    }
+  );
+
+  assert.equal(discovery.matched, false);
+  assert.equal(discovery.amazonProduct, null);
+  assert.ok(discovery.matchScore < 60);
+  assert.match(discovery.rejectionReason, /below minimum 60/);
+  assert.equal(visited.length, 1);
+});
