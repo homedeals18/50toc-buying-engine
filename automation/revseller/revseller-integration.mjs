@@ -128,7 +128,8 @@ function hasExtractedRevsellerValues(data) {
 export function extractRevsellerFields({ panelText, asin, productTitle, productUrl, fields = {}, panelFound, diagnostics, frameDebug, visibleTextCandidates } = {}) {
   const text = rawPanelTextFromPanel({ panelText, diagnostics, frameDebug, visibleTextCandidates });
   const found = panelFound ?? Boolean(text.trim() || Object.values(fields).some((value) => String(value ?? '').trim()));
-  const extractedAsin = firstNonEmpty(fields.asin, valueAfterLabel(text, 'ASIN'), text.match(/\b[A-Z0-9]{10}\b/)?.[0], asin);
+  const pageAsin = String(productUrl ?? '').match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i)?.[1]?.toUpperCase();
+  const extractedAsin = firstNonEmpty(pageAsin, fields.asin, valueAfterLabel(text, 'ASIN'), asin, text.match(/\b[A-Z0-9]{10}\b/)?.[0]);
   const priceText = firstValid(
     isMoneyValue,
     text.match(/\bBuy Box\s+(\$[0-9,.]+)/i)?.[1],
@@ -153,8 +154,8 @@ export function extractRevsellerFields({ panelText, asin, productTitle, productU
     fbaFees: feeText || null,
     estimatedProfit: profitText || null,
     roi: roiText || null,
-    bsr: firstNonEmpty(text.match(/\bRstr\s+([0-9,]+)/i)?.[1], valueAfterLabel(text, '(?:BSR|Best Sellers Rank|Sales Rank|Rank)'), fields.bsr),
-    category: firstNonEmpty(text.match(/\bRstr\s+[0-9,]+\s+in\s+(.+?)\s+[0-9]+(?:\.[0-9]+)?%\s+30d Sales/i)?.[1], valueAfterLabel(text, 'Category'), fields.category),
+    bsr: firstNonEmpty(text.match(/\b(?:Rstr|Appr)\s+([0-9,]+)/i)?.[1], valueAfterLabel(text, '(?:BSR|Best Sellers Rank|Sales Rank|Rank)'), fields.bsr),
+    category: firstNonEmpty(text.match(/\b(?:Rstr|Appr)\s+[0-9,]+\s+in\s+(.+?)\s+[0-9]+(?:\.[0-9]+)?%\s+30d Sales/i)?.[1], valueAfterLabel(text, 'Category'), fields.category),
     hazmatWarning: hazmatText || null,
     meltableWarning: meltableText || null,
     ipRestrictionWarnings: ipText || null,

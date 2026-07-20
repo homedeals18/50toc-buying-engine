@@ -207,3 +207,18 @@ test('rejects RevSeller interface labels that are not actual numeric values', ()
   assert.equal(result.hazmatWarning, null);
   assert.equal(result.variation, null);
 });
+
+
+test('uses opened child ASIN and current Appr rank instead of parent and 90d rank', () => {
+  const liveText = 'Appr 5,267 in Health & Household 0.05% 30d Sales 5K+ 30d Drops 29 90d Rank 3,600 Parent: B0GLRG6WXW B0GF9VRJLY Low FBA $5.97 Buy Box $5.97';
+  const result = extractRevsellerFields({
+    panelText: liveText,
+    productUrl: 'https://www.amazon.com/dp/B0GF9VRJLY?th=1',
+    panelFound: true
+  });
+
+  assert.equal(result.asin, 'B0GF9VRJLY');
+  assert.equal(result.bsr, '5,267');
+  assert.equal(result.category, 'Health & Household');
+  assert.equal(result.currentAmazonPrice, 5.97);
+});
