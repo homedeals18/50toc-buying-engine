@@ -13,6 +13,7 @@ export const defaultExecutionLogPath = path.join(repositoryRoot, 'artifacts', 'a
 export const defaultExecutionReportPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'module-execution-report.json');
 export const defaultRevsellerUnavailableScreenshotPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'revseller-unavailable.png');
 export const defaultRevsellerUnavailableHtmlPath = path.join(repositoryRoot, 'artifacts', 'amazon', 'revseller-unavailable.html');
+export const defaultMinimumAmazonMatchScore = 60;
 export const defaultInputCandidates = [
   path.join(repositoryRoot, 'artifacts', 'main', 'final-shopping-list.json'),
   path.join(repositoryRoot, 'artifacts', 'bjs', 'logs', 'deal-products.json'),
@@ -122,7 +123,7 @@ export async function fetchAmazonPageTextWithBrowserSession(url, { page } = {}) 
   return browserPage.content();
 }
 
-export async function discoverAmazonProduct(product, { fetchText, page } = {}) {
+export async function discoverAmazonProduct(product, { fetchText, page, minimumMatchScore = defaultMinimumAmazonMatchScore } = {}) {
   const searchQuery = buildAmazonSearchQuery(product);
   const searchUrl = `https://www.amazon.com/s?k=${encodeURIComponent(searchQuery)}`;
   const browserPage = page ?? (!fetchText ? await getAmazonBrowserPage() : null);
@@ -130,7 +131,18 @@ export async function discoverAmazonProduct(product, { fetchText, page } = {}) {
   const searchHtml = await readPageText(searchUrl, { kind: 'search', product });
   const candidates = parseAmazonSearchResults(searchHtml);
   const bestCandidate = selectBestAmazonCandidate(product, candidates);
-  if (!bestCandidate) return { sourceProduct: product, searchQuery, searchUrl, matched: false, amazonProduct: null, candidates: [] };
+  if (!bestCandidate || bestCandidate.matchScore < minimumMatchScore) {
+    return {
+      sourceProduct: product,
+      searchQuery,
+      searchUrl,
+      matched: false,
+      matchScore: bestCandidate?.matchScore ?? null,
+      amazonProduct: null,
+      candidates: bestCandidate ? [bestCandidate] : [],
+      rejectionReason: bestCandidate ? `Amazon match score ${bestCandidate.matchScore} is below minimum ${minimumMatchScore}` : 'No Amazon candidates found'
+    };
+  }
   const productHtml = await readPageText(bestCandidate.productUrl, { kind: 'product', product, candidate: bestCandidate });
   const amazonProduct = { ...bestCandidate, ...parseAmazonProductPage(productHtml, bestCandidate.productUrl) };
   return { sourceProduct: product, searchQuery, searchUrl, matched: Boolean(amazonProduct.asin), matchScore: bestCandidate.matchScore, amazonProduct };
