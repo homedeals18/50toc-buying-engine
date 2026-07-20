@@ -87,8 +87,42 @@ test('rejects observed BJ fresh produce and refrigerated lemonade names', () => 
   }
 });
 
-test('keeps non-food lemon and oatmilk color names while rejecting air purifier', () => {
-  assert.equal(categoryAllowed({ productName: 'Artstyle Lemon Twist Summer Plates', category: 'Grocery' }), true);
-  assert.equal(categoryAllowed({ productName: 'Contigo Travel Mug - Licorice & Oatmilk', category: 'Grocery' }), true);
+test('rejects housewares without confusing lemon or oatmilk words for produce', () => {
+  assert.equal(categoryAllowed({ productName: 'Artstyle Lemon Twist Summer Plates', category: 'Grocery' }), false);
+  assert.equal(categoryAllowed({ productName: 'Contigo Travel Mug - Licorice & Oatmilk', category: 'Grocery' }), false);
+  assert.equal(categoryAllowed({ productName: 'Lemon Scent Dish Soap', category: 'Health & Household' }), true);
+  assert.equal(categoryAllowed({ productName: 'Oatmilk Shampoo', category: 'Health & Beauty' }), true);
   assert.equal(categoryAllowed({ productName: 'Shark Air Purifier - White', category: 'Health & Household' }), false);
+});
+
+
+test('rejects every Berkley Jensen product regardless of category', () => {
+  for (const productName of [
+    'Berkley Jensen 27-Gal. Storage Box',
+    'Berkley Jensen Peanut Butter Crackers',
+    'Berkley Jensen Household Cleaning Wipes'
+  ]) {
+    assert.equal(evaluateListingProduct({ productName, category: 'Grocery' }).accepted, false, productName);
+    assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
+  }
+});
+
+test('rejects observed out-of-scope housewares before product-page evaluation and during repair', () => {
+  const names = [
+    'Artstyle Lemon Twist Summer 12" Oval Plates, 50 ct.',
+    "Artstyle 'Lemon Twist' Summer Premium Dinner Napkins, 100 ct.",
+    'Bentgo Food Storage 4-Pc. Container Set',
+    'Ello Plastic 10-Pc. Meal Prep Storage Container Set',
+    'GreenPan Rio 10-Pc. Aluminum Cookware Set',
+    'Sur La Table Chamberlin Folding Acacia Wood Tray',
+    'Cirkul Stainless Steel Water Bottle Starter Kit, 22 oz.',
+    'Graco Travel Lite Portable Bassinet',
+    'Midea Smart 8,000 BTU Window Air Conditioner',
+    'Calpak Quantum Large Checked Suitcase',
+    "$25 BJ's Gift Card"
+  ];
+  for (const productName of names) {
+    assert.equal(evaluateListingProduct({ productName }).accepted, false, productName);
+    assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
+  }
 });
