@@ -45,6 +45,7 @@ test('rejects variety assorted mixed flavor and sampler products before product 
   assert.equal(evaluateListingProduct({ productName: 'Assorted Candy' }).accepted, false);
   assert.equal(evaluateListingProduct({ productName: 'Cookie Sampler' }).accepted, false);
   assert.equal(evaluateListingProduct({ productName: 'Snack Variety Pack' }).accepted, false);
+  assert.equal(evaluateListingProduct({ productName: 'Febreze Spring Scent Mix' }).accepted, false);
 });
 
 test('accepts normal pack and peanut butter products', () => {
@@ -93,7 +94,14 @@ test('rejects observed BJ fresh produce and refrigerated lemonade names', () => 
     'Broccoli Florets, 2 lbs.',
     'Peaches, 4 lbs.',
     'Romaine Lettuce Hearts, 6 ct.',
-    'Goldendew Melon, 1 ct.'
+    'Goldendew Melon, 1 ct.',
+    'Premium Fresh Whole Garlic, 24 oz.',
+    'Bi-Color Seedless Grapes, 3 lbs.',
+    'Flavor Bombs Cherry Tomatoes, 1.5 lbs.',
+    'Sleeved Celery Stalk',
+    'Seedless Red Grapes, 3 lbs.',
+    'Raspberries, 12 oz.',
+    'Mini Watermelon'
   ]) {
     assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
   }
@@ -141,6 +149,7 @@ test('rejects observed out-of-scope housewares before product-page evaluation an
     'Igloo 60 qt. Latitude Roller Cooler',
     "Lifetime 6' Fold-in-Half Table - Almond",
     'Tineco LiteVak',
+    'Body Glove Child Paddle Pals Life Vest',
     "$25 BJ's Gift Card"
   ];
   for (const productName of names) {
@@ -166,4 +175,9 @@ test('rejects every Wellsley Farms product regardless of category', () => {
     assert.equal(evaluateListingProduct({ productName, category: 'Grocery' }).accepted, false, productName);
     assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
   }
+});
+
+
+test('rejects observed oversized Welch grape juice during repair', () => {
+  assert.equal(categoryAllowed({ productName: "Welch's 100% Concord Grape Juice, 2 pk./96 oz.", category: 'Grocery' }), false);
 });
