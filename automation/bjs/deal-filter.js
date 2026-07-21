@@ -82,7 +82,9 @@ export function listingProductAllowed(product = {}) {
 }
 
 function numericPrice(value) {
-  const parsed = Number(String(value ?? '').replace(/[^0-9.-]+/g, ''));
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  const parsed = Number(raw.replace(/[^0-9.-]+/g, ''));
   return Number.isFinite(parsed) ? parsed : null;
 }
 
