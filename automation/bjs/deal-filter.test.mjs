@@ -81,7 +81,19 @@ test('rejects observed BJ fresh produce and refrigerated lemonade names', () => 
     'Wellsley Farms Organic Baby Cut Carrots, 2 lbs.',
     'Angel Sweet Grape Tomatoes, 2 lbs.',
     'Wellsley Farms English Seedless Cucumbers, 2 ct.',
-    'Simply Lemonade with Raspberry, Bottles, 3 pk./52 fl. oz.'
+    'Simply Lemonade with Raspberry, Bottles, 3 pk./52 fl. oz.',
+    'POM Wonderful 100% Pomegranate Juice, 48 oz.',
+    'The Little Potato Co. Little Yellows, 3 lbs.',
+    'Mandarins, 5 lbs.',
+    'Kiwi Fruit, 3 lbs.',
+    'Fresh Express Baby Spinach, 20 oz.',
+    'Spice World Organic Whole Garlic, 5 ct.',
+    'Cosmic Crisp Apples, 4 lbs.',
+    'Gold Kiwi, 2 lbs.',
+    'Broccoli Florets, 2 lbs.',
+    'Peaches, 4 lbs.',
+    'Romaine Lettuce Hearts, 6 ct.',
+    'Goldendew Melon, 1 ct.'
   ]) {
     assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
   }
