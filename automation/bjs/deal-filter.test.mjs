@@ -46,6 +46,7 @@ test('rejects variety assorted mixed flavor and sampler products before product 
   assert.equal(evaluateListingProduct({ productName: 'Cookie Sampler' }).accepted, false);
   assert.equal(evaluateListingProduct({ productName: 'Snack Variety Pack' }).accepted, false);
   assert.equal(evaluateListingProduct({ productName: 'Febreze Spring Scent Mix' }).accepted, false);
+  assert.equal(categoryAllowed({ productName: 'Febreze Spring Scent Mix', category: 'Health & Household' }), false);
 });
 
 test('accepts normal pack and peanut butter products', () => {
