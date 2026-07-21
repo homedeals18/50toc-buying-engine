@@ -120,6 +120,11 @@ test('rejects observed out-of-scope housewares before product-page evaluation an
     'Midea Smart 8,000 BTU Window Air Conditioner',
     'Calpak Quantum Large Checked Suitcase',
     'Excello Global Products 9 Compartment Plastic Storage Organizer',
+    'NUK Simply Natural Bottles with SafeTemp 12-Pc. Gift Set',
+    'LCG Florals 30-Inch Orchid in Black Ceramic Pot',
+    "Chef'n 2-Pc. PalmBrush and PalmPeeler Set",
+    'Crane Drop 2.0 Cool Mist Humidifier',
+    'Sterilite 15-Qt. Latching Boxes, 2-Pc. Set',
     "$25 BJ's Gift Card"
   ];
   for (const productName of names) {
