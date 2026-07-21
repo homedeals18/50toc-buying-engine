@@ -7,7 +7,7 @@ const rejectedHousewaresPattern = /\b(?:paper\s+plates?|dinner\s+plates?|oval\s+
 
 const rejectedVarietyPattern = /\b(variety(?:\s+pack)?|assorted|assortment|mixed\s+(?:pack|variety|flavo[u]?r)|multi\s+flavo[u]?r|flavo[u]?r\s+variety|scent\s+mix|sampler)\b/i;
 
-const frozenChilledPattern = /\b(frozen|refrigerated|chilled|meat|seafood|fish|dairy|produce|fresh fruit|fresh vegetables?|avocados?(?!\s+(?:oil|chips?|snacks?))|cherries|nectarines|seedless watermelon|organic bananas|fresh gourmet carrots|seedless green grapes|vidalia sweet onions|organic baby cut carrots|grape tomatoes|english seedless cucumbers|simply lemonade|pomegranate juice|little (?:yellows|potatoes?)|mandarins?|kiwi fruit|gold kiwi|baby spinach|organic whole garlic|cosmic crisp apples|broccoli florets|peaches|romaine lettuce|goldendew melon|fresh whole garlic|(?:bi-color )?seedless grapes|flavor bombs cherry tomatoes|celery stalk|raspberries|mini watermelon)\b/i;
+const frozenChilledPattern = /\b(frozen|refrigerated|chilled|meat|seafood|fish|dairy|produce|fresh fruit|fresh vegetables?|avocados?(?!\s+(?:oil|chips?|snacks?))|cherries|nectarines|seedless watermelon|organic bananas|fresh gourmet carrots|seedless green grapes|vidalia sweet onions|organic baby cut carrots|grape tomatoes|english seedless cucumbers|simply lemonade|pomegranate juice|little (?:yellows|potatoes?)|mandarins?|kiwi fruit|gold kiwi|baby spinach|organic whole garlic|cosmic crisp apples|broccoli florets|peaches|romaine lettuce|goldendew melon|fresh whole garlic|(?:bi-color seedless|seedless (?:red |green )?)grapes|flavor bombs cherry tomatoes|celery stalk|raspberries|mini watermelon)\b/i;
 const repairOnlyRejectedNamePattern = /\b(?:air purifiers?|welch's 100% concord grape juice)\b/i;
 
 const listingSignalFields = [
