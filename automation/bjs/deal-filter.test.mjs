@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { categoryAllowed, evaluateListingProduct, mergeDuplicateProducts, productIdentity } from './deal-filter.js';
+import { categoryAllowed, dealHasVerifiedDiscount, evaluateListingProduct, mergeDuplicateProducts, productIdentity } from './deal-filter.js';
 
 test('rejects unrelated departments before product page', () => {
   for (const word of ['Furniture', 'Garden', 'Toys', 'Electronics', 'Mattresses', 'Patio']) {
@@ -181,4 +181,14 @@ test('rejects every Wellsley Farms product regardless of category', () => {
 
 test('rejects observed oversized Welch grape juice during repair', () => {
   assert.equal(categoryAllowed({ productName: "Welch's 100% Concord Grape Juice, 2 pk./96 oz.", category: 'Grocery' }), false);
+});
+
+
+test('requires numeric evidence for an active deal', () => {
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: '$9.99', originalPrice: '$12.99', discount: 'Clearance' }), true);
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: '$9.99', discount: 'Save $3.00' }), true);
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: '$9.99', discount: '20% off' }), true);
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: '$9.99', discount: 'Clearance', coupon: "Coupons Ask Bev Buy It Again" }), false);
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: null, discount: 'Save $3.00' }), false);
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: '$12.99', originalPrice: '$9.99' }), false);
 });
