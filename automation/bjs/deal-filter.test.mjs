@@ -119,6 +119,7 @@ test('rejects observed out-of-scope housewares before product-page evaluation an
     'Graco Travel Lite Portable Bassinet',
     'Midea Smart 8,000 BTU Window Air Conditioner',
     'Calpak Quantum Large Checked Suitcase',
+    'Excello Global Products 9 Compartment Plastic Storage Organizer',
     "$25 BJ's Gift Card"
   ];
   for (const productName of names) {
