@@ -160,6 +160,12 @@ test('rejects observed out-of-scope housewares before product-page evaluation an
 });
 
 
+test('rejects Samsung electronics even when the title omits TV', () => {
+  const productName = 'Samsung 85" The Frame Pro LS03FWD Neo QLED 4K with Coverage';
+  assert.equal(evaluateListingProduct({ productName, category: 'Grocery' }).accepted, false);
+  assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false);
+});
+
 test('rejects Igloo reusable cooling products regardless of misleading category', () => {
   for (const productName of ['Igloo 60 qt. Latitude Roller - Carbonite', 'Igloo Reusable Ice Block Bundle']) {
     assert.equal(evaluateListingProduct({ productName, category: 'Grocery' }).accepted, false, productName);
