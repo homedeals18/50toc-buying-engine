@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { categoryAllowed, mergeDuplicateProducts, productIdentity } from './deal-filter.js';
+import { categoryAllowed, dealHasVerifiedDiscount, mergeDuplicateProducts, productIdentity } from './deal-filter.js';
 import { normalizeBjsPrice } from './price-utils.mjs';
 import { runBuyingPipeline, writeCombinedShoppingListReport } from '../shared/buying-engine.js';
 import { sanitizeProductBrand } from '../shared/product-brand.mjs';
@@ -30,7 +30,7 @@ const normalized = saved.map((product) => ({
   packageSize: extractPackageSize(product.productName) ?? normalizePackageSize(product.packageSize),
   currentPrice: normalizeBjsPrice(product.currentPrice),
   originalPrice: normalizeBjsPrice(product.originalPrice)
-})).filter(categoryAllowed);
+})).filter((product) => categoryAllowed(product) && dealHasVerifiedDiscount(product));
 
 const deduped = mergeDuplicateProducts(normalized);
 const evaluated = await runBuyingPipeline(deduped.products);
