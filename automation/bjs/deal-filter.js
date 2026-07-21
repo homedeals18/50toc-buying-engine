@@ -81,6 +81,20 @@ export function listingProductAllowed(product = {}) {
   return evaluateListingProduct(product).accepted;
 }
 
+function numericPrice(value) {
+  const parsed = Number(String(value ?? '').replace(/[^0-9.-]+/g, ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function dealHasVerifiedDiscount(product = {}) {
+  const currentPrice = numericPrice(product.currentPrice);
+  const originalPrice = numericPrice(product.originalPrice);
+  if (currentPrice !== null && originalPrice !== null && originalPrice > currentPrice) return true;
+  if (currentPrice === null) return false;
+  const evidence = compact([product.discount, product.coupon].filter(Boolean).join(' '));
+  return /(?:save\s*\$?\s*(?!0(?:\.0+)?\b)\d+(?:\.\d{1,2})?|(?:[1-9]\d*(?:\.\d+)?)%\s*off)\b/i.test(evidence);
+}
+
 export function categoryAllowed(product = {}) {
   const category = compact(product.category);
   const productText = compact([product.productName, product.brand, category].filter(Boolean).join(' '));
