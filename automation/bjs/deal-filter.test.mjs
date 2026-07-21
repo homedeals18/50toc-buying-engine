@@ -126,3 +126,15 @@ test('rejects observed out-of-scope housewares before product-page evaluation an
     assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
   }
 });
+
+
+test('rejects every Wellsley Farms product regardless of category', () => {
+  for (const productName of [
+    'Wellsley Farms Peanut Butter Crackers',
+    'Wellsley Farms Infant Formula',
+    'Wellsley Farms Paper Towels'
+  ]) {
+    assert.equal(evaluateListingProduct({ productName, category: 'Grocery' }).accepted, false, productName);
+    assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
+  }
+});
