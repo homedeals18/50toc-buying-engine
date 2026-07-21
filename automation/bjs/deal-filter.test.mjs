@@ -127,6 +127,8 @@ test('rejects observed out-of-scope housewares before product-page evaluation an
     'Sterilite 15-Qt. Latching Boxes, 2-Pc. Set',
     'Nutri Slicer XL Multifunctional Vegetable Chopper',
     'Igloo 60 qt. Latitude Roller Cooler',
+    "Lifetime 6' Fold-in-Half Table - Almond",
+    'Tineco LiteVak',
     "$25 BJ's Gift Card"
   ];
   for (const productName of names) {
