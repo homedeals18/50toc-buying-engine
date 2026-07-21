@@ -84,7 +84,7 @@ export function listingProductAllowed(product = {}) {
 export function categoryAllowed(product = {}) {
   const category = compact(product.category);
   const productText = compact([product.productName, product.brand, category].filter(Boolean).join(' '));
-  if (rejectedBrandPattern.test(productText) || rejectedHousewaresPattern.test(productText)) return false;
+  if (rejectedBrandPattern.test(productText) || rejectedHousewaresPattern.test(productText) || rejectedVarietyPattern.test(productText)) return false;
   if (frozenChilledPattern.test(productText) || repairOnlyRejectedNamePattern.test(productText)) return false;
   if (!category) return true;
   return wantedCategoryPattern.test(category) && !rejectedDepartmentPattern.test(category);
