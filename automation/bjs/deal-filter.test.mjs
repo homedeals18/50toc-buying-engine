@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { categoryAllowed, evaluateListingProduct, mergeDuplicateProducts, productIdentity } from './deal-filter.js';
+import { categoryAllowed, dealHasVerifiedDiscount, evaluateListingProduct, mergeDuplicateProducts, productIdentity } from './deal-filter.js';
 
 test('rejects unrelated departments before product page', () => {
   for (const word of ['Furniture', 'Garden', 'Toys', 'Electronics', 'Mattresses', 'Patio']) {
@@ -45,6 +45,8 @@ test('rejects variety assorted mixed flavor and sampler products before product 
   assert.equal(evaluateListingProduct({ productName: 'Assorted Candy' }).accepted, false);
   assert.equal(evaluateListingProduct({ productName: 'Cookie Sampler' }).accepted, false);
   assert.equal(evaluateListingProduct({ productName: 'Snack Variety Pack' }).accepted, false);
+  assert.equal(evaluateListingProduct({ productName: 'Febreze Spring Scent Mix' }).accepted, false);
+  assert.equal(categoryAllowed({ productName: 'Febreze Spring Scent Mix', category: 'Health & Household' }), false);
 });
 
 test('accepts normal pack and peanut butter products', () => {
@@ -81,14 +83,118 @@ test('rejects observed BJ fresh produce and refrigerated lemonade names', () => 
     'Wellsley Farms Organic Baby Cut Carrots, 2 lbs.',
     'Angel Sweet Grape Tomatoes, 2 lbs.',
     'Wellsley Farms English Seedless Cucumbers, 2 ct.',
-    'Simply Lemonade with Raspberry, Bottles, 3 pk./52 fl. oz.'
+    'Simply Lemonade with Raspberry, Bottles, 3 pk./52 fl. oz.',
+    'POM Wonderful 100% Pomegranate Juice, 48 oz.',
+    'The Little Potato Co. Little Yellows, 3 lbs.',
+    'Mandarins, 5 lbs.',
+    'Kiwi Fruit, 3 lbs.',
+    'Fresh Express Baby Spinach, 20 oz.',
+    'Spice World Organic Whole Garlic, 5 ct.',
+    'Cosmic Crisp Apples, 4 lbs.',
+    'Gold Kiwi, 2 lbs.',
+    'Broccoli Florets, 2 lbs.',
+    'Peaches, 4 lbs.',
+    'Romaine Lettuce Hearts, 6 ct.',
+    'Goldendew Melon, 1 ct.',
+    'Premium Fresh Whole Garlic, 24 oz.',
+    'Bi-Color Seedless Grapes, 3 lbs.',
+    'Flavor Bombs Cherry Tomatoes, 1.5 lbs.',
+    'Sleeved Celery Stalk',
+    'Seedless Red Grapes, 3 lbs.',
+    'Raspberries, 12 oz.',
+    'Mini Watermelon'
   ]) {
     assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
   }
 });
 
-test('keeps non-food lemon and oatmilk color names while rejecting air purifier', () => {
-  assert.equal(categoryAllowed({ productName: 'Artstyle Lemon Twist Summer Plates', category: 'Grocery' }), true);
-  assert.equal(categoryAllowed({ productName: 'Contigo Travel Mug - Licorice & Oatmilk', category: 'Grocery' }), true);
+test('rejects housewares without confusing lemon or oatmilk words for produce', () => {
+  assert.equal(categoryAllowed({ productName: 'Artstyle Lemon Twist Summer Plates', category: 'Grocery' }), false);
+  assert.equal(categoryAllowed({ productName: 'Contigo Travel Mug - Licorice & Oatmilk', category: 'Grocery' }), false);
+  assert.equal(categoryAllowed({ productName: 'Lemon Scent Dish Soap', category: 'Health & Household' }), true);
+  assert.equal(categoryAllowed({ productName: 'Oatmilk Shampoo', category: 'Health & Beauty' }), true);
   assert.equal(categoryAllowed({ productName: 'Shark Air Purifier - White', category: 'Health & Household' }), false);
+});
+
+
+test('rejects every Berkley Jensen product regardless of category', () => {
+  for (const productName of [
+    'Berkley Jensen 27-Gal. Storage Box',
+    'Berkley Jensen Peanut Butter Crackers',
+    'Berkley Jensen Household Cleaning Wipes'
+  ]) {
+    assert.equal(evaluateListingProduct({ productName, category: 'Grocery' }).accepted, false, productName);
+    assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
+  }
+});
+
+test('rejects observed out-of-scope housewares before product-page evaluation and during repair', () => {
+  const names = [
+    'Artstyle Lemon Twist Summer 12" Oval Plates, 50 ct.',
+    "Artstyle 'Lemon Twist' Summer Premium Dinner Napkins, 100 ct.",
+    'Bentgo Food Storage 4-Pc. Container Set',
+    'Ello Plastic 10-Pc. Meal Prep Storage Container Set',
+    'GreenPan Rio 10-Pc. Aluminum Cookware Set',
+    'Sur La Table Chamberlin Folding Acacia Wood Tray',
+    'Cirkul Stainless Steel Water Bottle Starter Kit, 22 oz.',
+    'Graco Travel Lite Portable Bassinet',
+    'Midea Smart 8,000 BTU Window Air Conditioner',
+    'Calpak Quantum Large Checked Suitcase',
+    'Excello Global Products 9 Compartment Plastic Storage Organizer',
+    'NUK Simply Natural Bottles with SafeTemp 12-Pc. Gift Set',
+    'LCG Florals 30-Inch Orchid in Black Ceramic Pot',
+    "Chef'n 2-Pc. PalmBrush and PalmPeeler Set",
+    'Crane Drop 2.0 Cool Mist Humidifier',
+    'Sterilite 15-Qt. Latching Boxes, 2-Pc. Set',
+    'Nutri Slicer XL Multifunctional Vegetable Chopper',
+    'Igloo 60 qt. Latitude Roller Cooler',
+    "Lifetime 6' Fold-in-Half Table - Almond",
+    'Tineco LiteVak',
+    'Body Glove Child Paddle Pals Life Vest',
+    "$25 BJ's Gift Card"
+  ];
+  for (const productName of names) {
+    assert.equal(evaluateListingProduct({ productName }).accepted, false, productName);
+    assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
+  }
+});
+
+
+test('rejects Samsung electronics even when the title omits TV', () => {
+  const productName = 'Samsung 85" The Frame Pro LS03FWD Neo QLED 4K with Coverage';
+  assert.equal(evaluateListingProduct({ productName, category: 'Grocery' }).accepted, false);
+  assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false);
+});
+
+test('rejects Igloo reusable cooling products regardless of misleading category', () => {
+  for (const productName of ['Igloo 60 qt. Latitude Roller - Carbonite', 'Igloo Reusable Ice Block Bundle']) {
+    assert.equal(evaluateListingProduct({ productName, category: 'Grocery' }).accepted, false, productName);
+    assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
+  }
+});
+
+test('rejects every Wellsley Farms product regardless of category', () => {
+  for (const productName of [
+    'Wellsley Farms Peanut Butter Crackers',
+    'Wellsley Farms Infant Formula',
+    'Wellsley Farms Paper Towels'
+  ]) {
+    assert.equal(evaluateListingProduct({ productName, category: 'Grocery' }).accepted, false, productName);
+    assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
+  }
+});
+
+
+test('rejects observed oversized Welch grape juice during repair', () => {
+  assert.equal(categoryAllowed({ productName: "Welch's 100% Concord Grape Juice, 2 pk./96 oz.", category: 'Grocery' }), false);
+});
+
+
+test('requires numeric evidence for an active deal', () => {
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: '$9.99', originalPrice: '$12.99', discount: 'Clearance' }), true);
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: '$9.99', discount: 'Save $3.00' }), true);
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: '$9.99', discount: '20% off' }), true);
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: '$9.99', discount: 'Clearance', coupon: "Coupons Ask Bev Buy It Again" }), false);
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: null, discount: 'Save $3.00' }), false);
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: '$12.99', originalPrice: '$9.99' }), false);
 });
