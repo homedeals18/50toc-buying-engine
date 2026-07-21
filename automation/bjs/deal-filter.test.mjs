@@ -136,6 +136,13 @@ test('rejects observed out-of-scope housewares before product-page evaluation an
 });
 
 
+test('rejects Igloo reusable cooling products regardless of misleading category', () => {
+  for (const productName of ['Igloo 60 qt. Latitude Roller - Carbonite', 'Igloo Reusable Ice Block Bundle']) {
+    assert.equal(evaluateListingProduct({ productName, category: 'Grocery' }).accepted, false, productName);
+    assert.equal(categoryAllowed({ productName, category: 'Grocery' }), false, productName);
+  }
+});
+
 test('rejects every Wellsley Farms product regardless of category', () => {
   for (const productName of [
     'Wellsley Farms Peanut Butter Crackers',
