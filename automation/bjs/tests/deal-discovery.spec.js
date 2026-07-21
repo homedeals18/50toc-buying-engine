@@ -4,7 +4,7 @@ import path from 'node:path';
 import { runBuyingPipeline, writeCombinedShoppingListReport } from '../../shared/buying-engine.js';
 import { sanitizeProductBrand } from '../../shared/product-brand.mjs';
 import { extractPackageSize, normalizePackageSize } from '../../shared/product-package.mjs';
-import { categoryAllowed, evaluateListingProduct, listingProductAllowed, mergeDuplicateProducts, normalizeProductUrl, productIdentity } from '../deal-filter.js';
+import { categoryAllowed, dealHasVerifiedDiscount, evaluateListingProduct, listingProductAllowed, mergeDuplicateProducts, normalizeProductUrl, productIdentity } from '../deal-filter.js';
 import { normalizeBjsPrice } from '../price-utils.mjs';
 
 const artifactRoot = path.resolve(process.cwd(), '../../artifacts/bjs');
@@ -400,7 +400,7 @@ function progressKeys(product = {}) {
 
 async function saveProgress(products, progress = {}) {
   await ensureArtifactDirs();
-  const unifiedProducts = products.map(unifiedDeal).filter(categoryAllowed);
+  const unifiedProducts = products.map(unifiedDeal).filter((product) => categoryAllowed(product) && dealHasVerifiedDiscount(product));
   const deduped = mergeDuplicateProducts(unifiedProducts);
   const evaluatedProducts = await runBuyingPipeline(deduped.products);
   await writeFile(dealProductsPath, JSON.stringify(evaluatedProducts, null, 2));
@@ -689,7 +689,7 @@ test.describe("BJ's store shopping list intelligence", () => {
             productPageTimings.push({ dealSource: dealSource.name, productUrl: product.productUrl, productName: product.productName, durationMs });
             console.log(`BJ's ${dealSource.name}: product page ${counts.attempted}/${dealSource.maxProductPages} duration ${msText(durationMs)} for ${product.productName ?? product.productUrl}; filled missing listing fields: ${missingFields.join(', ')}.`);
           }
-          if (categoryAllowed(enrichedProduct)) {
+          if (categoryAllowed(enrichedProduct) && dealHasVerifiedDiscount(enrichedProduct)) {
             sourceProducts.push(enrichedProduct);
             products.push(enrichedProduct);
             counts.accepted += 1;
@@ -699,7 +699,7 @@ test.describe("BJ's store shopping list intelligence", () => {
             counts.rejected += 1;
             for (const key of [...progressKeys(product), ...progressKeys(enrichedProduct)]) processedProductKeys.add(key);
             await saveProgress(products, { lastStore: null, lastUrl: enrichedProduct.productUrl, processedProductKeys: [...processedProductKeys], storeConcurrency, productPageConcurrency });
-            console.log(`BJ's ${dealSource.name}: skipped unrelated category "${enrichedProduct.category}" for ${enrichedProduct.productName ?? enrichedProduct.productUrl}.`);
+            console.log(`BJ's ${dealSource.name}: skipped product without an allowed category and verified numeric discount for ${enrichedProduct.productName ?? enrichedProduct.productUrl}.`);
           }
         } catch (error) {
           counts.failed += 1;
