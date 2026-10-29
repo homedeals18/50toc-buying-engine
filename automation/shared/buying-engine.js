@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { shelfStableFoodFilterText } from './shelf-stable-food.mjs';
 
 export const varietyPackPattern = /\b(?:variety|variety[-\s]+pack|assorted|mixed[-\s]+pack|mixed[-\s]+variety|multi[-\s]+flavo[u]?r|flavo[u]?r[-\s]+variety|assortment|sampler)\b/i;
 export const coldFreshExcludedPattern = /\b(?:refrigerated|frozen|dairy|milk|cheese|yogurt|butter|eggs?|meat|beef|pork|poultry|chicken|turkey|seafood|fish|fresh\s+produce|produce)\b/i;
@@ -14,7 +15,8 @@ export function businessRejectionReasons(product) {
   const combined = [product.category, product.productName, product.brand, product.packageSize].filter(Boolean).join(' ');
   const reasons = [];
   if (varietyPackPattern.test(combined)) reasons.push('Explicit variety/assorted/mixed/flavor-variety/sampler product');
-  if (coldFreshExcludedPattern.test(combined)) reasons.push('Refrigerated, frozen, dairy, meat, seafood, or fresh produce product');
+  const coldText = product.supplier === "BJ's Wholesale Club" ? shelfStableFoodFilterText(combined) : combined;
+  if (coldFreshExcludedPattern.test(coldText)) reasons.push('Refrigerated, frozen, dairy, meat, seafood, or fresh produce product');
   return reasons;
 }
 

@@ -28,3 +28,14 @@ test('buying pipeline adds Amazon profitability fields and decisions', async () 
   assert.equal(product.roi, '105.00%');
   assert.equal(product.buyingDecision, 'Buy');
 });
+
+test('BJ allowed food names survive the downstream business filter', async () => {
+  for (const productName of ['Skippy Peanut Butter', 'Swedish Fish Candy', 'Canned Fish', 'Fish Oil Capsules', 'Dried Meat Snacks', 'Shelf-Stable Dairy Drink']) {
+    const product = { supplier: "BJ's Wholesale Club", productName, currentPrice: '$9.99' };
+    assert.deepEqual(businessRejectionReasons(product), [], productName);
+    assert.equal((await runBuyingPipeline([product])).length, 1, productName);
+  }
+  for (const productName of ['Frozen Peanut Butter', 'Refrigerated Dairy', 'Fresh Fish', 'Assorted Candy']) {
+    assert.ok(businessRejectionReasons({ supplier: "BJ's Wholesale Club", productName }).length, productName);
+  }
+});

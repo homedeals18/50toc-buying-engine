@@ -15,3 +15,8 @@ test('preserves and standardizes ordinary prices', () => {
   assert.equal(normalizeBjsPrice(7.5), '$7.50');
   assert.equal(normalizeBjsPrice(null), null);
 });
+
+test('malformed thousands separators cannot become valid prices', () => {
+  assert.equal(normalizeBjsPrice('$1,2'), null);
+  assert.equal(normalizeBjsPrice('$1,000.00'), '$1000.00');
+});
