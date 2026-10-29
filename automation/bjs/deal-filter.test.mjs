@@ -198,3 +198,51 @@ test('requires numeric evidence for an active deal', () => {
   assert.equal(dealHasVerifiedDiscount({ currentPrice: null, discount: 'Save $3.00' }), false);
   assert.equal(dealHasVerifiedDiscount({ currentPrice: '$12.99', originalPrice: '$9.99' }), false);
 });
+
+test('all filtering stages reject excluded brands in brand fields and URL slugs', () => {
+  for (const brand of ['Wellsley Farms', 'BERKLEY JENSEN', 'Wellsley-Farms', 'Berkley_Jensen']) {
+    for (const category of [null, 'Grocery', 'Health & Beauty', 'Health & Household']) {
+      for (const signal of [{ brand }, { productUrl: `https://www.bjs.com/product/${brand.replaceAll(' ', '-')}/1` }]) {
+        const product = { productName: 'Peanut Butter Crackers', category, ...signal };
+        assert.equal(evaluateListingProduct(product).accepted, false, JSON.stringify(product));
+        assert.equal(categoryAllowed(product), false, JSON.stringify(product));
+      }
+    }
+  }
+});
+
+test('final and repair filters reject unrelated products even under misleading or absent categories', () => {
+  for (const category of [null, 'Grocery']) {
+    for (const productName of ['Brand Microwave', 'Brand Chair', 'Brand Batteries', 'Artstyle Plates', 'Brand Mixed Nuts']) {
+      assert.equal(categoryAllowed({ category, productName }), false, productName);
+    }
+  }
+});
+
+test('allowed shelf-stable food personal care and consumables survive both filter stages', () => {
+  for (const [productName, category] of [
+    ['Swedish Fish Candy', 'Candy'], ['Canned Fish in Olive Oil', 'Grocery'],
+    ['Fish Oil Capsules', 'Health & Beauty'], ['Dried Meat Snacks', 'Grocery'],
+    ['Shelf Stable Dairy Drink', 'Grocery'], ['Lemon Cookies', 'Grocery'],
+    ['Oatmilk Shampoo', 'Health & Beauty'], ['Lemon Scent Dish Soap', 'Health & Household'],
+    ['Blue Diamond Almonds 24 Pack', null], ['Skippy Peanut Butter 2 Pack', 'Grocery'],
+    ['Pure Life Bottled Water', 'Beverages'], ['Bounty Paper Towels', 'Household Consumables']
+  ]) {
+    assert.equal(evaluateListingProduct({ productName, category }).accepted, true, productName);
+    assert.equal(categoryAllowed({ productName, category }), true, productName);
+  }
+});
+
+test('verified deals require finite positive prices and valid bounded discount evidence', () => {
+  for (const currentPrice of [0, -1, Infinity, NaN, '$0.00', '-$2', 'free', 'USD 9.99', '9.99 / oz', '1.2.3', true, '$1,2']) {
+    assert.equal(dealHasVerifiedDiscount({ currentPrice, originalPrice: '$12.99', discount: 'Save $3' }), false, String(currentPrice));
+  }
+  for (const discount of ['Save 20 points', 'Save $0', 'Save $0.001', 'Save $-3', '-20% off', '0% off', '100% off', '120% off', 'Clearance', 'Wow Deals']) {
+    assert.equal(dealHasVerifiedDiscount({ currentPrice: '$9.99', discount }), false, discount);
+  }
+  for (const originalPrice of ['$0', '-$1', 'garbage', '$8', '$9.99']) {
+    assert.equal(dealHasVerifiedDiscount({ currentPrice: '$9.99', originalPrice, coupon: 'Save $3' }), false, originalPrice);
+  }
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: '$1,000.00', originalPrice: '$1,200.00' }), true);
+  assert.equal(dealHasVerifiedDiscount({ currentPrice: 9.99, discount: '0.5% off' }), true);
+});

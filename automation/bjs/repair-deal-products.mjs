@@ -24,7 +24,7 @@ await copyFile(productsPath, backupPath);
 
 const invalidBrandsRemoved = saved.filter((product) => product.brand && !sanitizeProductBrand(product.brand)).length;
 const packageSizesRecovered = saved.filter((product) => !product.packageSize && extractPackageSize(product.productName)).length;
-const normalized = saved.map((product) => ({
+const normalized = saved.filter(categoryAllowed).map((product) => ({
   ...product,
   brand: sanitizeProductBrand(product.brand),
   packageSize: extractPackageSize(product.productName) ?? normalizePackageSize(product.packageSize),
