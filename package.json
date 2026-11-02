@@ -25,7 +25,8 @@
     "scrape:bjs:deals:test": "npm --prefix automation/bjs run scrape:bjs:deals:test",
     "test:bjs:filter": "npm --prefix automation/bjs run unit",
     "repair:bjs:data": "npm --prefix automation/bjs run repair:data",
-    "enrich:bjs:upcs:manual-chrome": "npm --prefix automation/bjs run enrich:upcs:manual-chrome"
+    "enrich:bjs:upcs:manual-chrome": "npm --prefix automation/bjs run enrich:upcs:manual-chrome",
+    "diagnose:bjs:listing-network": "npm --prefix automation/bjs run diagnose:listing-network"
   },
   "devDependencies": {
     "playwright": "latest"
