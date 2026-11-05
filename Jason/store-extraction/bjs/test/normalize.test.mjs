@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {normalize,handoff} from '../src/normalize.mjs';
+const p={sku:'123',productName:'Test',currentPrice:'$9.99',dealSource:'Clearance'};
+test('extracts price and identity',()=>{const x=normalize(p,{storeId:'A'});assert.equal(x.currentPrice,9.99);assert.equal(x.extraction.status,'valid');});
+test('missing UPC is warning',()=>{const x=normalize(p,{storeId:'A'});assert.ok(x.extraction.warnings.includes('missing_upc'));});
+test('rejects invalid price',()=>{const x=handoff({storeId:'A',scanComplete:true,products:[p,{...p,sku:'124',currentPrice:null}]});assert.equal(x.products.length,1);assert.equal(x.rejectedRecords.length,1);});
+test('deduplicates',()=>assert.equal(handoff({storeId:'A',scanComplete:true,products:[p,p]}).report.duplicateCount,1));
+test('rejects incomplete scans',()=>assert.throws(()=>handoff({storeId:'A',scanComplete:false,products:[p]}),/Incomplete scan/));
+test('rejects incomplete coverage',()=>assert.throws(()=>handoff({storeId:'A',scanComplete:true,expectedProductCount:2,products:[p]}),/Incomplete coverage/));
