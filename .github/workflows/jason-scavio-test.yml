@@ -1,0 +1,53 @@
+name: Jason Scavio API test
+on:
+  workflow_dispatch:
+    inputs:
+      endpoint:
+        description: 'Scavio data source'
+        type: choice
+        required: true
+        default: costcoClearance
+        options:
+          - costcoClearance
+          - costcoDeals
+          - costcoWarehouses
+          - samsClearance
+          - samsSavings
+          - samsClubs
+      warehouse_id:
+        description: 'Costco warehouse ID (required for clearance)'
+        required: false
+        type: string
+      query:
+        description: 'Costco clearance search phrase'
+        required: false
+        default: snacks
+        type: string
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    environment: jason-scavio-test
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Offline connector tests
+        run: node --test Jason/scavio/test/*.test.mjs
+      - name: Run one API request
+        env:
+          SCAVIO_API_KEY: ${{ secrets.SCAVIO_API_KEY }}
+          SCAVIO_KIND: ${{ inputs.endpoint }}
+          WAREHOUSE: ${{ inputs.warehouse_id }}
+          QUERY: ${{ inputs.query }}
+        run: |
+          if [ -z "$SCAVIO_API_KEY" ]; then echo "Missing SCAVIO_API_KEY environment secret"; exit 1; fi
+          export SCAVIO_BODY="$(node -e 'const kind=process.env.SCAVIO_KIND;const body=kind==="costcoClearance"?{warehouse_id:process.env.WAREHOUSE,query:process.env.QUERY,pages:1}:kind==="costcoWarehouses"?{zip:"10025"}:kind==="samsClearance"?{page:1}:{};process.stdout.write(JSON.stringify(body))')"
+          node Jason/scavio/src/run.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jason-scavio-response
+          path: artifacts/scavio-response.json
+          retention-days: 3
