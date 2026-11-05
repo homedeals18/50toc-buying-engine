@@ -1,0 +1,18 @@
+{
+  "storeId": "DEMO",
+  "storeLocation": "Synthetic example",
+  "scanComplete": true,
+  "expectedProductCount": 1,
+  "products": [
+    {
+      "sku": "123",
+      "productName": "Example Item",
+      "dealSource": "Clearance",
+      "currentPrice": 9.99,
+      "upc": "036000291452",
+      "brand": "Example",
+      "packageSize": "12 ct",
+      "productUrl": "https://www.bjs.com/example"
+    }
+  ]
+}
