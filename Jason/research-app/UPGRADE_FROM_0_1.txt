@@ -1,0 +1,29 @@
+50TOC JASON RESEARCH AND ENRICHMENT 0.2
+
+REAL SEARCHES
+Use START_RESEARCH.cmd. Connect Scavio in Settings / APIs, find nearby warehouses
+and load departments, then choose the scope and press Scan Deals.
+START_DEMO.cmd uses synthetic example products and warehouses and no API credits.
+Both modes open the same local address, so close the older service window first.
+
+KEEP YOUR JASON 0.1 DATA
+The new ZIP starts with no live research or keys. To use existing Jason 0.1 data:
+1. Stop the old and new service windows.
+2. Keep a backup copy of the old application's entire data folder.
+3. Copy the old data folder into the new extracted application folder, or configure
+   FIFTYTOC_DATA_DIR to use the same existing data directory.
+4. Start the new version. Its additive database migration retains Research data
+   and prepares title-based enrichment records for saved products automatically.
+
+Never run both versions against the same data directory at the same time.
+Windows-encrypted keys may require re-entry under another account/computer.
+Session-only keys are cleared when their service closes and must be re-entered.
+This upgrade covers Jason 0.1 PostgreSQL/PGlite data, not the separate older
+Research Web 1.x SQLite prototype. That prototype's data is not silently migrated.
+
+ENRICHMENT
+Open Enrichment in the sidebar. Review a product, compare title/API evidence,
+edit the values, and save a draft or confirm the reviewed fields. Unknown or
+unreviewed details remain flagged. Corrections and revision history survive
+rescans. Changed title or packaging evidence requires a recheck.
+Photo analysis remains disconnected. No AI keys or paid image calls are used.

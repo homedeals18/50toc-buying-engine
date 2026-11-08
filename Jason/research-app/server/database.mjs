@@ -33,5 +33,6 @@ export async function openDatabase({connectionString, dataDir}={}) {
 }
 
 async function migrate(db) {
-  await db.exec(await readFile(new URL('../migrations/001_research.sql',import.meta.url),'utf8'));
+  for(const name of ['001_research.sql','002_enrichment.sql'])
+    await db.exec(await readFile(new URL('../migrations/'+name,import.meta.url),'utf8'));
 }

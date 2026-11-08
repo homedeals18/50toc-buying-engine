@@ -1,10 +1,10 @@
-# 50TOC — Jason Costco Research
+# 50TOC — Jason Research and Enrichment 0.2
 
-First working Research module in Jason: React, a Node.js service, and PostgreSQL storage. All code is under this directory. The inherited frontend, Python backend, other extractors, and main branch are unchanged.
+Costco Research plus product Enrichment fields and human review in Jason: React, a Node.js service, and PostgreSQL storage. All code is under this directory. The inherited frontend, Python backend, other extractors, and main branch are unchanged.
 
 ## Try it on Windows
 
-The prepared Windows ZIP includes Node and the application dependencies. Extract the whole folder first, then double-click **START_DEMO.cmd** for synthetic examples, or **START_RESEARCH.cmd** for the live connector. No Python, Node installation, database installation, or package download is needed for that prepared ZIP.
+The prepared Windows ZIP includes Node and the application dependencies. Extract the whole folder first, then double-click **START_RESEARCH.cmd** for real Scavio searches. **START_DEMO.cmd** is optional and shows synthetic example products and warehouses. No Python, Node installation, database installation, or package download is needed for that prepared ZIP.
 
 Keep the service window open. Open the address printed there in your browser. The default is http://127.0.0.1:8876. Closing the browser does not stop a scan. Closing the service stops the application. After interruption, press **Resume incomplete scan**; paid calls never resume just because the application restarted.
 
@@ -64,13 +64,29 @@ Diagnostics retain operation, stage, event ID, status, duration and safe error c
 
 This initial service binds to **127.0.0.1 only**, checks Host, Origin and an app-page session token, and serves bundled React assets with a Content Security Policy. It is a local development application, not multi-user authentication. Hosted sign-in, user roles, TLS, backups and remote access must be implemented before deployment. No Kamatera or other hosted service was changed.
 
+## Enrichment and review
+
+Saved Research products receive local title-based suggestions automatically, including existing products on startup. No Scavio, model, photo-download or other paid call is made by this stage.
+
+The review screen separates product name, product type/form, containers per club package, container type, contents per container, total contents, size amount/unit/basis, flavor, scent, variant, strength and variety-pack status. Brand and UPC remain source facts. It never assumes a missing club package count is one. A capsule/tablet count is not a count of bottles; ambiguous per-container versus total counts stay unresolved.
+
+API facts and exact title evidence remain visible alongside editable values and individual review states. Conflicting values stay unknown until the reviewer resolves them. The size basis inferred from title layout is labeled and requires human review. All extraction is conservative rules, not a general AI interpretation of arbitrary titles.
+
+Save draft retains work without confirming it. Confirm reviewed fields records the human review; incomplete records become Reviewed with gaps. A fully reviewed identity is not a purchase approval and does not trigger Amazon matching. Corrections outside source suggestions or conflicts require a short explanatory note. The reviewer name is a local history label, not an authenticated identity.
+
+One enrichment record is shared across warehouse offers for a club product. Profiles and append-only revision history are separate from original Research data. Price/timestamp-only rescans do not invalidate identity review. Title, package facts, UPC, image-link or other identity changes retain corrections and mark them for recheck. Optimistic revision checks and product-row locks prevent silent concurrent overwrites. Browser edits stay in the mounted review when navigating between sidebar modules; reloading/closing warns about unsaved work.
+
+Photo analysis is explicitly disconnected. API photo links are available for manual viewing, but the app does not download or interpret images in this release. Enrichment CSV/JSON exports include field review states and evidence. See UPGRADE_FROM_0_1.txt before reusing existing Jason data; migration 002 adds tables without replacing Research or legacy corrections.
+
 ## Verification boundaries
 
 Automated tests use synthetic provider fixtures and the real embedded PostgreSQL engine. They cover multi-page/247-item scans, no price ceiling, scoping, retries, stop/resume, concurrency, transactional rollback, immutable history, stale-cache behavior, diagnostics, redaction, formatted credit balances, local API access checks, exports, disk persistence and memory-only key storage. The synthetic Windows DPAPI round-trip test explicitly skips if the automated logon context cannot encrypt. This occurred on the build machine; encrypted storage still requires an interactive test under the user's normal Windows account.
 
 Browser checks use the synthetic demo. No real Scavio search, paid API call, Keepa/Amazon connection, retailer login or hosted PostgreSQL server was used. The external PostgreSQL driver path needs an integration run against the selected server. Actual provider response shape/coverage and available credits still require a user-run live pilot.
 
-Enrichment/photo analysis, Amazon matching, ROI, human approvals, buying/worker operations, scheduling and SMS remain later modules. Sidebar entries mark that status explicitly. Research alone does not authorize purchases.
+Additional tests cover title extraction, ambiguous counts, API/title conflicts, manual draft/confirmation history, incomplete identities, invalid values, concurrent review conflicts, rescan persistence and changed-source rechecks. Browser checks exercise editing, saving, reopening, review status and history on desktop/mobile layouts. These use synthetic data; the extraction rules are not guaranteed to understand every SKU.
+
+Photo analysis, Amazon matching, ROI, purchase approvals, buying/worker operations, scheduling and SMS remain later modules. Sidebar entries mark that status explicitly. Research and Enrichment do not authorize purchases.
 
 ## Provider references checked for this implementation
 

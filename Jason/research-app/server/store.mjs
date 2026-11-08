@@ -1,3 +1,4 @@
+import {syncProductProfile} from './enrichment.mjs';
 const ns='jason_research.';
 const json=x=>JSON.stringify(x);
 const merge=(old, next)=>({
@@ -46,11 +47,14 @@ export class Store {
     const snapshot=merge(oldScan,offer);
     if(current) snapshot.firstSeen=new Date(current.first_seen).toISOString()<snapshot.firstSeen?new Date(current.first_seen).toISOString():snapshot.firstSeen;
     await db.query('INSERT INTO '+ns+'products VALUES($1,$2,$3::jsonb) ON CONFLICT(id) DO NOTHING',[offer.productKey,offer.retailer,json({title:offer.title,brand:offer.brand,upc:offer.upc,itemNumber:offer.itemNumber})]);
+    // Serialize identity observations and enrichment confirmations for this product.
+    await db.query('SELECT id FROM '+ns+'products WHERE id=$1 FOR UPDATE',[offer.productKey]);
     // A cached older observation remains evidence, but cannot replace a newer offer.
     if(!current || current.body.observedAt<=offer.observedAt) {
       await db.query('INSERT INTO '+ns+'offers VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(id) DO UPDATE SET body=EXCLUDED.body,first_seen=LEAST('+ns+'offers.first_seen,EXCLUDED.first_seen)',[offer.id,offer.productKey,offer.warehouseId,snapshot.firstSeen,json(snapshot)]);
     }
     await db.query('INSERT INTO '+ns+'scan_offers VALUES($1,$2,$3::jsonb) ON CONFLICT(scan_id,offer_id) DO UPDATE SET body=EXCLUDED.body',[scanId,offer.id,json(snapshot)]);
+    await syncProductProfile(db,offer.productKey);
   }
   async offers({scanId=null, search='', decision='all'}={}){
     const rows=scanId?(await this.db.query('SELECT body FROM '+ns+'scan_offers WHERE scan_id=$1',[scanId])).rows:(await this.db.query('SELECT body FROM '+ns+'offers')).rows;

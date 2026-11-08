@@ -8,11 +8,15 @@ import {ResearchEngine} from './engine.mjs';
 import {AppError,safeError,eventFor} from './errors.mjs';
 import {dealTypes,categoriesFrom,planScan,coverage} from './costco.mjs';
 import {toCsv} from './export.mjs';
+import {EnrichmentService} from './enrichment.mjs';
+import {fieldDefinitions} from './enrichment-fields.mjs';
 
 export async function createApp({db,dataDir,provider:injectedProvider,vault:injectedVault,retryDelay=1500,demo=false}){
   const store=new Store(db),vault=injectedVault??new KeyVault(dataDir),provider=injectedProvider??new ScavioProvider(store,vault);
   const engine=new ResearchEngine(store,provider,{retryDelay}),session=randomUUID();
   await engine.initialize();
+  const enrichment=new EnrichmentService(store);
+  enrichment.initialize();
   let base;
   const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer',
     'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://gdx-assets.costco.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"};
@@ -41,7 +45,7 @@ export async function createApp({db,dataDir,provider:injectedProvider,vault:inje
         if(!body||typeof body!=='object'||Array.isArray(body))throw new AppError('JSON_REQUIRED','A JSON object is required.');
       }
       if(p==='/api/state'&&req.method==='GET'){
-        send(res,{version:'Jason Research 0.1',demo,databaseMode:db.mode,configured:provider.configured(),keyStorageMode:demo?'demo':vault.mode(),
+        send(res,{version:'Jason Research 0.2',demo,databaseMode:db.mode,configured:provider.configured(),keyStorageMode:demo?'demo':vault.mode(),enrichmentPreparing:enrichment.preparing,
           categories:await store.get('categories',[]),warehouses:await store.get('warehouses',[]),
           preferences:await store.get('preferences',{warehouses:[],categoryIds:[],dealTypes:['clearance','manager_markdown']}),
           rules:await store.get('rules',{flagVariety:true,flagPerishable:true}),jobs:await store.jobs(),dealTypes,coverage,priceLimit:null,analysisConnected:false});return;
@@ -88,6 +92,22 @@ export async function createApp({db,dataDir,provider:injectedProvider,vault:inje
         return;
       }
       if(p==='/api/diagnostics'&&req.method==='GET'){send(res,{events:await store.events()});return;}
+      if(p==='/api/enrichment'&&req.method==='GET'){
+        send(res,{...(await enrichment.list({search:url.searchParams.get('q')??'',status:url.searchParams.get('status')??'all',page:Math.max(1,Number.parseInt(url.searchParams.get('page'))||1)})),fieldDefinitions});return;
+      }
+      if(p==='/api/enrichment/product'&&req.method==='GET'){
+        send(res,{...(await enrichment.get(url.searchParams.get('productKey'))),fieldDefinitions});return;
+      }
+      if(p==='/api/enrichment/review'&&req.method==='POST'){
+        if(typeof body.productKey!=='string')throw new AppError('PRODUCT_REQUIRED','Choose a saved club product.');
+        send(res,await enrichment.save(body.productKey,body));return;
+      }
+      if(p==='/api/enrichment/export'&&req.method==='GET'){
+        const rows=(await db.query('SELECT body FROM jason_research.enrichment_profiles ORDER BY product_key')).rows.map(r=>r.body);
+        if(url.searchParams.get('format')==='csv')send(res,toCsv(rows),200,'text/csv; charset=utf-8');
+        else send(res,{schema:'50toc.enrichment.v1',exportedAt:new Date().toISOString(),photoAnalysis:'not_connected',products:rows});
+        return;
+      }
       throw new AppError('NOT_FOUND','Not found.',{status:404});
     }catch(error){
       const e=error instanceof AppError?error:new AppError('LOCAL_ERROR','The operation failed. Saved research is retained.',{status:500,stage:'local'});
@@ -97,8 +117,8 @@ export async function createApp({db,dataDir,provider:injectedProvider,vault:inje
       send(res,safeError(e),e.status);
     }
   });
-  return {server,store,engine,provider,session,
+  return {server,store,engine,provider,session,enrichment,
     async listen(port=8876){await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});base='http://127.0.0.1:'+server.address().port;return base;},
-    async close(){await engine.close();await new Promise(resolve=>server.close(resolve));await db.close();}
+    async close(){await engine.close();await enrichment.close();await new Promise(resolve=>server.close(resolve));await db.close();}
   };
 }
