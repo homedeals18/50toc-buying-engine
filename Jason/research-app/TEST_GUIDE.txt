@@ -1,0 +1,80 @@
+50TOC JASON CORE WORKFLOW 0.5 - TEST GUIDE
+
+START THE CORRECT VERSION
+1. Close the command window for any older 50TOC service.
+2. Extract this entire ZIP into a new folder. Do not run files inside the ZIP.
+3. START_DEMO.cmd uses synthetic examples and no credits. Real key fields are disabled.
+   START_RESEARCH.cmd is LIVE and uses your own Scavio and Keepa connections.
+4. Open http://127.0.0.1:8876 in Chrome, Edge or the ChatGPT browser on this computer.
+   The footer should say Core workflow 0.5. A DEMO banner means no real API searches.
+5. Leave the service window open. Screen-off is fine; sleep pauses local work.
+
+EXISTING DATA
+See UPGRADE_FROM_0_1.txt before moving data. Never run two versions against one data
+folder. Back up the whole data folder before upgrading. No real data or keys ship
+in this package, and the default live and demo databases remain separate.
+
+ONE CORE WORKFLOW TO TEST
+1. Settings / APIs: connect Scavio in LIVE mode. Test Connection is documented as
+   zero credits. Save Keepa separately if available; saving makes no paid call.
+2. Research: select warehouses, departments and deal types, then Scan Deals.
+   Research follows all supported returned pages without a product or price cap.
+3. Enrichment: confirm product identity and package fields. Keep unknown values
+   flagged; title suggestions alone are not human review. Photo analysis is off.
+4. Exact matching: estimate UPC lookup for one or all saved products, then Start.
+   Review sources, count/size conflicts and full-package versus inner-unit scope.
+   Check digits validate a number, not product identity. Confirm the package UPC.
+5. Connect Keepa in Settings, then use Look up Amazon ASINs in Exact matching.
+   This uses Keepa tokens in LIVE mode. Imported facts require review. All returned
+   ASINs are retained; potential matches remain separate from exact matches.
+6. Review each Amazon candidate's identity fields, package count and barcode scope.
+   There is also a manual ASIN-entry path. No secondary broad-search engine yet.
+7. Settings / APIs > Profit Controls: choose your actual ROI, dollar profit, rank,
+   monthly velocity and Close ranges. They are initially unset, not invented.
+   Worker allowance defaults to $0.75 per club package; prep/shipping $0.75 per
+   finished Amazon unit. Exact matching currently uses one full club package per
+   Amazon unit. Rebundling/conversion and quantity recommendations are deferred.
+8. Analysis: choose the saved club product, ASIN and warehouse offer. Enter tax,
+   a current Buy Box price, confirmed TOTAL Amazon fee estimate, rank/category,
+   and monthly sales estimate with its source/period. Keepa fee components are
+   not a complete fee total, and bought-past-month brackets are not sales velocity.
+   Explicit zero is allowed where an actual cost is zero; missing fees stay unknown.
+9. Approvals: review Normal or Close. A Close approval requires an exception reason.
+   Every buying target needs a full-access approval. Losses and unresolved critical
+   data cannot be overridden into buying. Reject once, block a mapping, or block
+   the product. Permanent blocks remain until explicitly removed.
+10. Approve a TOTAL quantity in club packages, a maximum club price and warehouses.
+    Enter an eligibility acknowledgment if the account check is not connected.
+    Budget warnings require an explicit full-access override with a reason.
+11. Worker / Buyer: reserve the units you plan to buy. Then record actual quantities,
+    price, tax and warehouse. One club 10-pack is one purchased and payable unit.
+    A 500 target with 100 bought leaves 400 across every permitted warehouse.
+    Lower prices are allowed. Higher prices require an urgent price-change request.
+12. Attach a receipt to the existing purchases. Reuploads do not add quantities.
+    Receipts: compare a selected item line after discounts, before tax, with the
+    existing entry. A full-access correction preserves history. Paid-unit changes
+    create a separate adjustment; previous payment amounts are not rewritten.
+13. Worker payments: select worker and dates (or Last 7 days), load unpaid units,
+    enter each item's rate, Calculate pay, then Mark paid. This RECORDS payment;
+    it does not send money. Paid units disappear from subsequent unpaid reports.
+14. Scheduling: create warehouse visits. Outstanding quantities carry forward.
+    The local daily checker runs while the service is open and uses SAVED source
+    observations. It does not claim a fresh API price. Stale required data holds
+    buying; refresh Research/Analysis and reapprove to resume. Price drops and
+    known sale dates are shown for review; no extra units are auto-approved.
+
+WORKER ACCESS
+Settings lets you create the first full-access account, which enables sign-in.
+Create additional full-access users or workers after that. Workers receive a
+separate screen and cannot access research, connections, controls, approvals or
+managerial fee/analysis snapshots through the API. Passwords are salted and hashed.
+The current build listens only on this computer. Shared hosting is not enabled.
+
+LIMITATIONS TO EXPECT
+No live Scavio, Keepa, Amazon SP-API, RevSeller or paid image request was made in
+development. Automated and browser checks use synthetic fixtures. Your live pilot
+must verify provider coverage, returned fields, fees, timestamps and usage.
+Photo/receipt OCR, direct Amazon fee/restriction checks, broader candidate search,
+alternate-pack conversion, SMS/email, seller SKU creation and hosted access remain
+disconnected or deferred. Receipt evidence can be uploaded and reviewed manually.
+Do not use a demo/example record as a real purchase authorization.

@@ -1,41 +1,30 @@
-50TOC JASON EXACT MATCHING AND UPC EVIDENCE 0.3
+50TOC JASON CORE BUYING WORKFLOW 0.5 - UPGRADE
 
-REAL SEARCHES
-Use START_RESEARCH.cmd. Connect Scavio in Settings / APIs, find nearby warehouses
-and load departments, then choose the scope and press Scan Deals.
-START_DEMO.cmd uses synthetic example products and warehouses and no API credits.
-Both modes open the same local address, so close the older service window first.
+1. Stop both old and new 50TOC services before moving data.
+2. Back up the old application's ENTIRE data folder.
+3. Extract the new ZIP into a NEW folder. Its default databases are initially empty.
+4. Copy the old Jason data folder into the new extracted folder, or point
+   FIFTYTOC_DATA_DIR to the existing data directory. Keep live and demo separate.
+5. Run START_RESEARCH.cmd for LIVE, START_DEMO.cmd for synthetic demonstration.
+   Close any older service using port 8876, then refresh the browser. Verify the
+   footer says Core workflow 0.5 and that live mode has no DEMO banner.
 
-KEEP YOUR JASON 0.1 OR 0.2 DATA
-The new ZIP starts with no live research or keys. To use existing Jason data:
-1. Stop the old and new service windows.
-2. Keep a backup copy of the old application's entire data folder.
-3. Copy the old data folder into the new extracted application folder, or configure
-   FIFTYTOC_DATA_DIR to use the same existing data directory.
-4. Start the new version. Its additive database migration retains Research data
-   and prepares title-based enrichment records for saved products automatically.
-   New matching and UPC tables are additive and retain existing review history.
+Existing Jason 0.1, 0.2 and 0.3 PostgreSQL/PGlite data is retained by additive
+migrations. Research, enrichment, corrections, UPC and candidate history remain.
+No old targets are fabricated from Research results. Every new target needs
+human approval. The older Research Web 1.x SQLite prototype is a separate app
+and is not silently imported.
 
-Never run both versions against the same data directory at the same time.
-Windows-encrypted keys may require re-entry under another account/computer.
-Session-only keys are cleared when their service closes and must be re-entered.
-This upgrade covers Jason 0.1/0.2 PostgreSQL/PGlite data, not the separate older
-Research Web 1.x SQLite prototype. That prototype's data is not silently migrated.
+Scavio and Keepa have separate key fields. No key or real database ships in the
+ZIP. Encrypted Windows keys can require re-entry under another Windows account.
+Session-only keys must be re-entered after service shutdown. Saving a key does
+not perform a paid lookup. DEMO disables real key input.
 
-ENRICHMENT
-Open Enrichment in the sidebar. Review a product, compare title/API evidence,
-edit the values, and save a draft or confirm the reviewed fields. Unknown or
-unreviewed details remain flagged. Corrections and revision history survive
-rescans. Changed title or packaging evidence requires a recheck.
-Photo analysis remains disconnected. No AI keys or paid image calls are used.
+Settings initially use Local manager on this computer. Creating the first
+full-access account enables sign-in. Keep the chosen credentials private and
+create worker accounts afterward. Workers cannot access manager APIs. Do not
+expose this loopback-only test build publicly; shared hosting is a later step.
 
-EXACT MATCHING
-Open Exact matching. Use UPC evidence to record a barcode from the correct package.
-An inner-unit barcode is different from the full club-package barcode. The
-optional retailer detail button uses Scavio credits in live mode and may not
-return a UPC. No barcode is automatically verified from a retailer SKU or title.
-
-Add a child-ASIN candidate using its actual Amazon package facts and source
-evidence. Live Amazon/Keepa discovery is not connected yet. Exact package matches
-are shown first; uncertain or alternate-pack candidates are parked separately.
-The broader secondary matching engine is deferred. No purchase approval is made.
+Read TEST_GUIDE.txt before the first complete test. Live provider calls were not
+used during development; fees, eligibility, photos/OCR and live daily source
+refresh have explicit verification/integration limitations in README.md.

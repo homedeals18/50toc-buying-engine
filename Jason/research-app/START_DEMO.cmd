@@ -6,7 +6,8 @@ if not exist "runtime\node.exe" (
   pause
   exit /b 1
 )
-echo Starting the demo. No real API calls or credits.
+echo Starting 50TOC Jason Buying Engine 0.5 - DEMO mode. No real API calls or credits.
+echo API key fields are disabled in DEMO. Use START_RESEARCH.cmd for real searches.
 echo Open the local address printed below. Keep this window open.
 "runtime\node.exe" server\main.mjs --demo --open-browser
 pause

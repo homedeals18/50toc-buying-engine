@@ -15,7 +15,12 @@ export class DemoProvider {
     let data;
     if(endpoint==='costco/categories')data={categories};
     else if(endpoint==='costco/warehouses')data={warehouses:[{warehouse_id:'1062',name:'Example Warehouse North',address:'Synthetic demonstration location'},{warehouse_id:'306',name:'Example Warehouse South',address:'Synthetic demonstration location'}]};
-    else if(endpoint==='costco/product')data={products:[{...items[0],specifications:[{name:'UPC',value:'012345678905'}]}]};
+    else if(endpoint==='costco/product')data={products:items.filter(i=>(body.item_ids??[body.item_id]).some(id=>[i.item_number,i.product_id].includes(id))).map(i=>({...i,specifications:i===items[0]?[{name:'UPC',value:'012345678905'}]:[]}))};
+    else if(endpoint==='google/customsearch'){
+      const detergent=body.q.toLowerCase().includes('laundry');
+      return {json:{searchInformation:{totalResults:'1'},items:[{title:detergent?items[1].title:items[2].title,link:'https://www.bjs.com/product/example-demo-only/'+(detergent?'DEMO-102':'DEMO-103'),snippet:detergent?'Synthetic example only. UPC: 036000291452.':'Synthetic example only. Barcode not published.'}]},observedAt:new Date().toISOString(),cached:false};
+    }
+    else if(endpoint==='extract')data={url:body.url,content:body.url.endsWith('DEMO-102')?'# '+items[1].title+'\nSpecifications\nUPC | 036000291452':'# '+items[2].title+'\nNo barcode is published in this synthetic example.'};
     else if(endpoint==='costco/coupons')data={valid_from:'2026-11-01',valid_to:'2026-11-30',coupons:[{...items[0],discount:{amount_off:3,final_price:16.97},applies_to:'warehouse'}]};
     else {
       const page=body.page??1;

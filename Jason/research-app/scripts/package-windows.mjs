@@ -8,7 +8,7 @@ const runtime=process.argv[3]&&path.resolve(process.argv[3]);
 if(!target||!runtime||!path.isAbsolute(target)||!path.isAbsolute(runtime))throw Error('Provide an empty target and the Node runtime directory.');
 await mkdir(target,{recursive:true});
 if((await readdir(target)).length)throw Error('The packaging target must be empty.');
-for(const entry of ['server','migrations','dist','test','package.json','README.md','UPGRADE_FROM_0_1.txt','START_RESEARCH.cmd','START_DEMO.cmd'])await cp(path.join(root,entry),path.join(target,entry),{recursive:true});
+for(const entry of ['server','migrations','dist','test','package.json','README.md','UPGRADE_FROM_0_1.txt','TEST_GUIDE.txt','START_RESEARCH.cmd','START_DEMO.cmd'])await cp(path.join(root,entry),path.join(target,entry),{recursive:true});
 const seen=new Map();
 async function copyPackage(name,from){
   const require=createRequire(path.join(from,'package.json'));

@@ -192,6 +192,6 @@ test('enrichment API enforces session access and exports reviewed details with e
     const saved=await fetch(base+'/api/enrichment/review',{method:'POST',headers,body:JSON.stringify({...payload(detail.profile),productKey:detail.profile.productKey})});
     assert.equal(saved.status,200);assert.equal((await saved.json()).profile.status,'reviewed');
     const csv=await (await fetch(base+'/api/enrichment/export?format=csv',{headers})).text();assert(csv.includes('fields.packCount.reviewState'));assert(csv.includes('sourceSnapshot'));
-    const state=await (await fetch(base+'/api/state',{headers})).json();assert.equal(state.analysisConnected,false);
+    const state=await (await fetch(base+'/api/state',{headers})).json();assert.equal(state.analysisConnected,true);
   }finally{await app.close();}
 });

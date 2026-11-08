@@ -145,7 +145,7 @@ test('API requires a local session and serves the built React application',async
     assert.equal((await fetch(base+'/api/state',{headers:{'x-50toc-session':app.session,Origin:'https://evil.invalid'}})).status,403);
     const headers={'x-50toc-session':app.session,'Content-Type':'application/json'};
     await app.store.set('categories',categories);
-    const state=await (await fetch(base+'/api/state',{headers})).json();assert.equal(state.priceLimit,null);assert.equal(state.analysisConnected,false);
+    const state=await (await fetch(base+'/api/state',{headers})).json();assert.equal(state.priceLimit,null);assert.equal(state.analysisConnected,true);
     assert.equal((await fetch(base+'/api/plan',{method:'POST',headers,body:'[]'})).status,400);
     const start=await fetch(base+'/api/scans',{method:'POST',headers,body:JSON.stringify(scope)});
     assert.equal(start.status,202);await app.engine.running;

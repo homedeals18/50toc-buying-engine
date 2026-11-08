@@ -3,12 +3,13 @@ import {createRoot} from 'react-dom/client';
 import './styles.css';
 import Enrichment from './Enrichment.jsx';
 import Matching from './Matching.jsx';
+import {ConnectionSettings,CoreWorkspace,WorkerScreen,SignIn} from './Core.jsx';
 
 const token=document.querySelector('meta[name="50toc-session"]').content;
 async function api(path,body){
   const response=await fetch('/api/'+path,{method:body===undefined?'GET':'POST',headers:{'x-50toc-session':token,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
   const result=await response.json();
-  if(!response.ok)throw new Error(result.error+(result.eventId?' · Event '+result.eventId:''));
+  if(!response.ok){if(result.code==='AUTH_REQUIRED')window.dispatchEvent(new Event('50toc-auth-required'));throw new Error(result.error+(result.eventId?' · Event '+result.eventId:''));}
   return result;
 }
 const money=n=>n===null||n===undefined?'Unknown':new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n);
@@ -24,7 +25,7 @@ function Selection({label,items,selected,onChange,empty,children,disabled=false}
   </section>;
 }
 
-function App(){
+function App({user,onLogout}){
   const [state,setState]=useState(null),[view,setView]=useState('research'),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
   const [warehouses,setWarehouses]=useState([]),[categoryIds,setCategoryIds]=useState([]),[types,setTypes]=useState([]),[zip,setZip]=useState('07601'),[force,setForce]=useState(false),[plan,setPlan]=useState(null);
   const [scanId,setScanId]=useState(''),[search,setSearch]=useState(''),[decision,setDecision]=useState('all'),[page,setPage]=useState(1),[results,setResults]=useState({offers:[],total:0}),[detail,setDetail]=useState(null);
@@ -93,16 +94,16 @@ function App(){
   return <div className="app">
     <aside className="sidebar"><a href="#research" className="brand" onClick={e=>{e.preventDefault();navigate('research');}}>50<span>TOC</span><small>BUYING ENGINE</small></a>
       <div className="workspace-label">JASON WORKSPACE</div>
-      <nav aria-label="Main navigation">{[['research','⌕','Research'],['library','▤','Research library'],['enrichment','◇','Enrichment'],['matching','≡','Exact matching'],['analysis','▥','Analysis'],['approvals','✓','Approvals'],['buying','▣','Worker / Buyer'],['scheduling','◷','Scheduling'],['settings','⚙','Settings / APIs']].map(([id,icon,label])=><button key={id} className={view===id?'nav active':'nav'} onClick={()=>navigate(id)} aria-current={view===id?'page':undefined}><span aria-hidden="true">{icon}</span>{label}{!['research','library','enrichment','matching','settings'].includes(id)&&<small>Later</small>}</button>)}</nav>
-      <div className="sidebar-footer"><span className={'dot '+(state.configured?'connected':'')}/>{state.demo?'Demonstration':state.configured?'Scavio configured':'Scavio not connected'}<small>Costco first · Research 0.3</small></div>
+      <nav aria-label="Main navigation">{[['research','⌕','Research'],['library','▤','Research library'],['enrichment','◇','Enrichment'],['matching','≡','Exact matching'],['analysis','▥','Analysis'],['approvals','✓','Approvals'],['buying','▣','Worker / Buyer'],['receipts','▤','Receipts'],['payments','$','Worker payments'],['scheduling','◷','Scheduling'],['settings','⚙','Settings / APIs']].map(([id,icon,label])=><button key={id} className={view===id?'nav active':'nav'} onClick={()=>navigate(id)} aria-current={view===id?'page':undefined}><span aria-hidden="true">{icon}</span>{label}</button>)}</nav>
+      <div className="sidebar-footer"><span className={'dot '+(state.configured?'connected':'')}/>{state.demo?'Demonstration':state.configured?'Scavio configured':'Scavio not connected'}<small>Costco first · Core workflow 0.5</small></div>
     </aside>
-    <main><header className="topbar"><span>50TOC / {view==='settings'?'Connections':view==='library'?'Saved research':title(view)}</span><span className="mode">{state.demo?'DEMO · No API credits used':'LOCAL DEVELOPMENT'}</span></header>
+    <main><header className="topbar"><span>50TOC / {view==='settings'?'Connections':view==='library'?'Saved research':title(view)}</span><div className="account-bar"><span>{user.username}</span>{!user.local&&<button onClick={onLogout}>Sign out</button>}<span className="mode">{state.demo?'DEMO · No API credits used':'LOCAL DEVELOPMENT'}</span></div></header>
       <div className="content">
         {state.demo&&<div className="demo-banner">Demonstration mode. All warehouses and products below are synthetic examples. Live and demo data are stored separately.</div>}
         {error&&<div role="alert" className="alert error">{error}<button onClick={()=>setError('')} aria-label="Dismiss error">×</button></div>}
         {notice&&<div role="status" className="alert success">{notice}</div>}
         <Enrichment active={view==='enrichment'} api={api} demo={state.demo} refreshKey={state.jobs.map(j=>j.id+j.pages+j.status).join('|')} requestedProduct={enrichProduct} onRequestHandled={()=>setEnrichProduct(null)}/>
-        <Matching active={view==='matching'} api={api} demo={state.demo} refreshKey={state.jobs.map(j=>j.id+j.pages+j.status).join('|')}/>
+        <Matching active={view==='matching'} api={api} demo={state.demo} keepaConfigured={state.keepaConfigured} refreshKey={state.jobs.map(j=>j.id+j.pages+j.status).join('|')}/>
         {['research','library'].includes(view)?<>
           <div className="page-heading"><div><div className="eyebrow">SOURCE & DISCOVER</div><h1>{view==='research'?'Costco Research':'Research library'}</h1><p>{view==='research'?'Choose where to look and which deals to collect.':'Your saved products, warehouse offers and original source evidence.'}</p></div><span className="phase">PHASE 01</span></div>
           {view==='research'&&<>
@@ -143,9 +144,10 @@ function App(){
             </form><button className="primary" disabled={busy||!state.configured} onClick={()=>run(async()=>{const result=await api('usage',{});setUsage(result);setNotice(state.demo?'Demo connection works. No real API call was made.':'Scavio connection verified.');})}>Test Connection · 0 credits</button>
             {usage&&<p className="connection-result">{usage.demo?'Demo balance': 'Available Scavio credits'}: <strong>{usage.creditBalance.toLocaleString()}</strong></p>}
           </section>
+          <ConnectionSettings api={api} demo={state.demo} state={state} onRefresh={refresh} user={user}/>
           <section className="settings-card"><h2>Sourcing flags</h2><p>These flags send uncertain products to Needs information; they do not approve purchases.</p>{[['flagVariety','Flag mixed or variety packs'],['flagPerishable','Flag refrigerated or perishable items']].map(([id,label])=><label className="choice" key={id}><input type="checkbox" checked={state.rules[id]!==false} disabled={busy||scanning} onChange={e=>run(async()=>{await api('rules',{...state.rules,[id]:e.target.checked});await refresh();})}/>{label}</label>)}</section>
-          <section className="settings-card"><h2>Storage & diagnostics</h2><p>{state.databaseMode}. This build is available on this computer only. Shared hosting and user sign-in will be added before remote access.</p><p>No Keepa connection, price ceiling, AI usage or purchase automation in this module.</p><button disabled={busy} onClick={()=>run(async()=>setDiagnostics((await api('diagnostics')).events))}>Show safe diagnostics</button>{diagnostics&&<pre className="raw">{JSON.stringify(diagnostics,null,2)}</pre>}</section>
-        </>:['enrichment','matching'].includes(view)?null:<section className="future-module"><div className="eyebrow">A LATER PHASE</div><h1>{view==='buying'?'Worker / Buyer':title(view)}</h1><p>This module is part of the agreed structure. We are building and testing Research and Enrichment before adding this phase.</p><button className="primary" onClick={()=>navigate('research')}>Return to Research</button></section>}
+          <section className="settings-card"><h2>Storage & diagnostics</h2><p>{state.databaseMode}. This build is available on this computer only. Enable accounts above before adding workers. Shared server hosting is a later deployment step.</p><p>No price ceiling, paid image analysis, SMS or automatic purchase approval.</p><button disabled={busy} onClick={()=>run(async()=>setDiagnostics((await api('diagnostics')).events))}>Show safe diagnostics</button>{diagnostics&&<pre className="raw">{JSON.stringify(diagnostics,null,2)}</pre>}</section>
+        </>:['enrichment','matching'].includes(view)?null:<CoreWorkspace view={view} api={api} user={user} onLogout={onLogout}/>}
       </div>
     </main>
     {detail&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setDetail(null);}}><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div className="dialog-top"><span className="eyebrow">SAVED RESEARCH EVIDENCE</span><button ref={detailClose} onClick={()=>setDetail(null)} aria-label="Close product details">Close ×</button></div><h2 id="detail-title">{detail.title}</h2><p>Item {detail.itemNumber||'not supplied'} · Warehouse #{detail.warehouseId}</p><div className="detail-prices"><div><small>Warehouse price</small><strong>{money(detail.warehousePrice)}</strong></div><div><small>Online price</small><strong>{money(detail.onlinePrice)}</strong></div><div><small>Observed</small><strong>{time(detail.observedAt)}</strong></div></div>
@@ -158,4 +160,13 @@ function App(){
   </div>;
 }
 
-createRoot(document.getElementById('root')).render(<App/>);
+function Root(){
+  const [auth,setAuth]=useState(null),[error,setError]=useState('');
+  async function refreshAuth(){setAuth(await api('auth/state'));setError('');}
+  useEffect(()=>{refreshAuth().catch(e=>setError(e.message));const fn=()=>refreshAuth().catch(e=>setError(e.message));window.addEventListener('50toc-auth-required',fn);window.addEventListener('50toc-auth-changed',fn);return()=>{window.removeEventListener('50toc-auth-required',fn);window.removeEventListener('50toc-auth-changed',fn);};},[]);
+  async function logout(){await api('auth/logout',{});await refreshAuth();}
+  if(!auth)return <div className="loading"><strong>50TOC</strong><p>{error||'Opening your local workspace…'}</p></div>;
+  if(!auth.user)return <SignIn api={api} onSignedIn={refreshAuth}/>;
+  return auth.user.role==='worker'?<WorkerScreen api={api} user={auth.user} onLogout={logout}/>:<App user={auth.user} onLogout={logout}/>;
+}
+createRoot(document.getElementById('root')).render(<Root/>);

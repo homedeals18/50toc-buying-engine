@@ -1,122 +1,71 @@
-# 50TOC — Jason Research Enrichment and Exact Matching 0.3
+# 50TOC — Jason Core Buying Workflow 0.5
 
-Costco Research, product Enrichment and the first exact-match stage in Jason: React, a Node.js service, and PostgreSQL storage. All code is under this directory. The inherited matching engine is not used by the new exact matcher. The inherited application directories and main branch remain unchanged.
+A local web application with React, Node 24 and PostgreSQL. The Windows package includes Node and embedded PostgreSQL (PGlite); no Python, Node or database installation is needed. All changes live under Jason. The inherited application directories and main branch remain untouched.
 
-## Try it on Windows
+## Start and upgrade
 
-The prepared Windows ZIP includes Node and the application dependencies. Extract the whole folder first, then double-click **START_RESEARCH.cmd** for real Scavio searches. **START_DEMO.cmd** is optional and shows synthetic example products and warehouses. No Python, Node installation, database installation, or package download is needed for that prepared ZIP.
+Extract the whole Windows ZIP. Close any older 50TOC command window, then run START_RESEARCH.cmd for LIVE mode or START_DEMO.cmd for synthetic examples without API credits. Open http://127.0.0.1:8876 in Chrome, Edge or the ChatGPT browser on this computer. The footer must show Core workflow 0.5. Real key fields are deliberately disabled in DEMO. Leave the service open; computer sleep pauses local work.
 
-Keep the service window open. Open the address printed there in your browser. The default is http://127.0.0.1:8876. Closing the browser does not stop a scan. Closing the service stops the application. After interruption, press **Resume incomplete scan**; paid calls never resume just because the application restarted.
+The ZIP includes no user data or real keys. Read UPGRADE_FROM_0_1.txt and back up the entire old data folder before using existing Jason 0.1, 0.2 or 0.3 records. Never run two versions against the same database. Migrations are additive. The older Research Web 1.x SQLite prototype is a separate application and is not silently migrated.
 
-Live setup: open **Settings / APIs**, paste the Scavio key, save it, and use **Test Connection** (the provider documents this as zero credits). No live key is included in the repository or ZIP. A server environment key takes precedence and cannot be changed through the screen.
+TEST_GUIDE.txt provides the test sequence and limitations. Source development uses `npm install`, `npm run build`, `npm test` and `npm start` with Node 24+. The prepared Windows ZIP already includes production dependencies and built assets.
 
-## Development from this repository
+## Research and Enrichment
 
-Use Node 24 or newer. From this directory:
+Costco is the first active research connector. Select actual warehouses, departments and deal types. Markdown endings share one department task. All supported returned result pages and products are processed with no arbitrary product cap and no purchase-price ceiling. Warehouse observations remain distinct from online prices, source pages retain evidence, and server-owned jobs can stop/resume. Failed coverage is visible. Provider coverage does not mean every item physically in a warehouse.
 
-~~~sh
-npm install
-npm run build
-npm test
-npm run demo
-# or, for the live connector:
-npm start
-~~~
+Enrichment extracts local title/structured-field suggestions for product, pack, contents, size/basis, flavor, scent, formulation and strength. Human fields and history survive rescans. Packaging changes require rechecking; price-only changes do not erase identity work. Research saves photo links; automated photo interpretation remains disconnected.
 
-For a locked pnpm install, use "pnpm install --frozen-lockfile". The committed pnpm lockfile pins the dependency tree. pnpm-workspace.yaml approves only esbuild's dependency build step.
+## Automatic UPC lookup
 
-## Research behavior
+Estimate one saved product or every eligible saved product, then explicitly start. No paid UPC job starts on ingestion, launch or restart. Saved explicit barcode fields are checked first. Missing identifiers use Costco product-detail batches of up to 20 items. Exact typed retailer IDs must agree; missing or ambiguous identities are not assigned by response order.
 
-- Select warehouses, actual provider departments/subdepartments, and independent deal types. Multi-select and Select all are available. No product keyword is required.
-- Markdown endings and sales share department reads. The service follows all supported pages (provider page range 1–500), not the clearance endpoint's 1–5-page sweep.
-- Each department/warehouse starts at one task. Feed selections add tasks and use department membership to retain only matching products. The coupon book adds one shared task. The planner explains these before starting.
-- At least 2 credits per US department/feed request and 1 for the coupon book, subject to the provider's current rates. Pagination and retries may add calls/cost. Warehouse and department lookup each cost 1 credit if uncached. Cache lifetime is 24 hours; observed times remain the original times.
-- There is no arbitrary product cap and **no price ceiling**. UI pagination is display-only; exports include all saved offers for the selected scan/library, irrespective of display page or text filter.
-- Selected .97/.00/.88/.49/.79/.89 endings derive from an identified warehouse price. An online price is never substituted. Special-buy endings are indicators, not proof of discount.
-- Missing warehouse-price evidence is retained as Needs information when a selected markdown cannot be classified. Regular nonmatching items are omitted from collected deals, but each returned source page is retained in scan evidence.
-- Provider categories and deal feeds only cover merchandise the provider can return. This does not establish complete physical warehouse inventory. Regular Costco is distinct from Costco Business Center delivery.
-- Sale flags, coupon dates/scope, identifiers, source records and API photo/product links are preserved. UPC is optional and is never fabricated from a retailer SKU.
-- Synthetic demo mode uses separate storage and never calls a network provider.
+For still-missing identifiers, use one Scavio Google Custom Search results page, retaining all returned valid public links and labelled barcode snippets, then read up to two ranked source pages through normal-mode Extract. This web-search depth is separate from Research pagination. Additional search links stay visible for manual follow-up. No automatic higher scraping tier, login, image reading or paid retry is used. The estimate is at most ceil(missing/20) + 3*missing Scavio credits if uncached; saved barcode fields, missing links and cache hits reduce requests. Both search and normal Extract are documented as 1 credit/request. Original cache observation times are retained.
 
-## Data and recovery
+The queue processes all eligible products and persists checkpoints and dated evidence. Stop finishes the in-flight request; Resume is explicit. Restart marks unfinished work interrupted without spending credits. Current verified full-package UPCs are skipped. Successfully checked unchanged products are skipped for 24 hours unless recheck is chosen. Failed/incomplete evidence remains flagged.
 
-migrations/001_research.sql creates the isolated jason_research schema. Products, warehouse offers, per-scan offer snapshots, immutable raw source pages, department membership, corrections, cache and safe diagnostic events are separate.
+Identifiers are found only in explicit API fields or labelled UPC/GTIN/EAN/barcode text; no barcode is invented from a title, SKU or item number. Keep leading zeroes and validate GS1 Modulo 10 for 8/12/13/14-digit strings. An 8-digit value must be GTIN-8; UPC-E expansion is not implemented. A checksum validates composition, not ownership or package identity. Numbers from another retailer, snippets, conflicting codes and differing product/package facts require human confirmation. Page text may include related variants, so all automatic findings remain unverified with unknown package scope. Lookup never overwrites a human UPC record.
 
-Page evidence, saved offers and the next-page cursor commit in a single transaction. Failed pages can be retried. Cancelling saves the current successful request before stopping. Interrupted scans stay interrupted until explicitly resumed.
+## Amazon exact matching
 
-Rescans preserve first-seen dates and prior snapshots. Manual corrections have a separate table and survive rescans; the correction editing interface is deferred to Enrichment. Cached older responses cannot replace a newer current warehouse offer. Library offer history is available through the scan selector.
+Save Keepa separately in Settings. A confirmed current full club-package UPC can query Keepa's US product-code endpoint with statistics and Buy Box data. Multiple returned ASINs are retained. Imported titles/fields/barcodes remain unreviewed, and existing human-reviewed ASIN records are preserved. A manual catalog-evidence entry path also exists. Keepa requests use a fixed HTTPS host, server-side credentials, dated 24-hour caching, bounded responses, redacted diagnostics and no automatic paid retries. Saving a key does not make a request. UPC searches can return multiple ASINs and consume tokens per the provider; no fixed total-token guarantee is implied.
 
-Exports: CSV with flattened nested fields (Excel-readable), and JSON with full records. Selecting a scan adds its original source pages to the JSON export. CSV guards against spreadsheet formula execution in provider text.
+The new exact engine does not import the inherited matcher. It requires reviewed identity and package evidence; brand, flavor, size, formulation and container/contents conflicts cannot be bypassed by a shared UPC. Current verified package UPC plus reviewed agreement yields the barcode exact route. A strict reviewed-details match without a verified UPC may enter normal exact review with the explicit UPC-unverified warning, per the agreed workflow. Inner-unit barcodes do not verify the outer club package. Potential matches, missing information and excluded mismatches remain separate. A secondary broader discovery/alternate-pack engine and selling-unit conversions are deferred.
 
-Default local storage is **PGlite**, an embedded PostgreSQL engine persisted in data/live/postgres or data/demo/postgres. It is a single-service local development option, not cross-device synchronization. Do not run two services against one embedded data directory.
+## Analysis and human approval
 
-For a full PostgreSQL server, provide DATABASE_URL through the server's secure environment. The same migration and parameterized queries are used. A dedicated PostgreSQL advisory lock prevents two Research workers against the same database. No database password or connection URL is returned to the browser. Do not put credentials in tracked files.
+Use the current Buy Box, confirmed total Amazon fee estimate, explicit club tax/cost inputs, rank/category and sourced monthly velocity. Keepa prices retain the provider's actual Buy Box update time; fetching old data does not make its price current. Missing/negative price sentinels stay unknown. Keepa fulfillment/referral components are not assumed to be the complete fee total, monthlySold is an Amazon bought-past-month lower-bound bracket rather than a sales estimate, and rank drops are not unit sales. Account eligibility is eligible, restricted or not checked; no missing check becomes eligible. Direct Amazon/RevSeller fee and restriction checks remain disconnected. Manual evidence supports the core test workflow.
 
-FIFTYTOC_DATA_DIR can select an explicit local data directory; PORT changes the local port. Copying an extracted ZIP does **not** automatically migrate existing prototype data. No existing installation, data or saved key is changed by this build.
+Complete cost per exact Amazon selling unit = club price + tax per club package + worker allowance per club package + standard prep/packing/inbound shipping + explicitly entered other costs. One exact club package currently corresponds to one Amazon selling unit. Net proceeds = current selling price - total Amazon fees. Profit = proceeds - complete cost; ROI = profit / complete cost. No cashback or rewards. Missing fees/costs stay unknown. Defaults are $0.75 worker allowance per club package and $0.75 standard prep/shipping per Amazon unit; additional rebundling $0.75 is retained in settings for the deferred alternate-pack module and is not silently charged to exact packages.
 
-## Connections and diagnostics
+Profit Controls require both ROI and dollar profit plus rank and velocity cutoffs and their Close ranges. Thresholds/tolerances are initially unset. Category rank/velocity overrides are supported. Negative known profit automatically rejects the opportunity; unresolved critical facts block approval. Close requires an explicit full-access exception reason. Every buying target requires human approval, with quantity in total club units, maximum club price, warehouses, user/time and preserved analysis/settings evidence. Unknown eligibility needs acknowledgment. Budget warnings use outstanding commitment plus applicable actual spending and require a recorded full-access override.
 
-Encrypted Windows storage uses DPAPI for the current Windows account, passes the key to PowerShell via stdin, and treats it as a string throughout. A copied encrypted key will not necessarily work under another account/computer; re-enter it there. If DPAPI is unavailable in a restricted/automated logon context, the screen reports the encryption step failure and offers **This session only**. That option keeps the replacement key in process memory, never writes it to disk, and clears it on shutdown. An older encrypted key, if any, remains the persisted connection for the next start.
+Reject an opportunity once, permanently block a mapping, or block the club product. Blocks and removal history survive rescans. Reanalysis retains history and holds outstanding buying for renewed approval; it does not erase bought units. UPC, profile, mapping and control changes are rechecked before recording another purchase. There is no automatic buying or club checkout.
 
-The Scavio connection test accepts numeric or strictly formatted numeric credit balances. Blank, malformed or changed response fields report a schema error with an event ID, not a false success or numeric-conversion exception.
+## Buying, receipts, pay and scheduling
 
-Diagnostics retain operation, stage, event ID, status, duration and safe error code. Provider raw error bodies, headers, cookies, keys, arbitrary driver exceptions and connection strings are omitted. Successful provider records are redacted before storage. Account-specific cache keys are hashes.
+A target is shared across permitted warehouses and workers: 500 approved minus 100 bought leaves 400. Workers reserve the units they plan to buy, preventing simultaneous allocation of the same remainder. Reservations do not silently expire while a worker shops; the worker can release their units. Purchases are transactional and idempotent, use actual unit price/tax/warehouse, accept lower prices within authorization and reject prices above the maximum. A higher-price submission holds buying for urgent review. Manual purchases immediately affect remaining and unpaid club units, without waiting for a receipt.
 
-This initial service binds to **127.0.0.1 only**, checks Host, Origin and an app-page session token, and serves bundled React assets with a Content Security Policy. It is a local development application, not multi-user authentication. Hosted sign-in, user roles, TLS, backups and remote access must be implemented before deployment. No Kamatera or other hosted service was changed.
+Workers submit new shelf finds, higher prices, not-found reports and corrections; photos/PDFs can be attached as evidence. Full-access intake explicitly confirms shelf identity/price before adding that observation to Research. It never skips identity, economics or purchase approval. In-store submissions remain visibly unqualified until reviewed. SMS/email are disconnected.
 
-## Enrichment and review
+Receipts attach to existing purchases and can cover multiple items. Content is validated as PDF/JPEG/PNG/WebP, up to 8 MB, stored with a checksum and access controls, and duplicate uploads do not add quantities. Manual receipt-line reconciliation compares quantity and discounted line total before separately recorded tax. OCR is disconnected. Manager corrections preserve audit history and update purchased/remaining quantities; changes to paid units create adjustment flags rather than rewriting completed payments.
 
-Saved Research products receive local title-based suggestions automatically, including existing products on startup. No Scavio, model, photo-download or other paid call is made by this stage.
+Worker pay is based on club packages, not inner bottles or Amazon units. Choose worker and inclusive New York calendar dates, enter item-group rates, Calculate, then Mark paid. Payments retain included purchase revisions, quantities, rates and totals; paid units are excluded from later unpaid quotes. Concurrent/retried requests cannot pay the same units twice. Mark paid records an external payment; the application does not transmit funds. Paid-work adjustments require manual review.
 
-The review screen separates product name, product type/form, containers per club package, container type, contents per container, total contents, size amount/unit/basis, flavor, scent, variant, strength and variety-pack status. Brand and UPC remain source facts. It never assumes a missing club package count is one. A capsule/tablet count is not a count of bottles; ambiguous per-container versus total counts stay unresolved.
+Warehouse visits can be planned without creating new targets. Outstanding quantities carry forward. A local checker runs at most once daily per outstanding target while the service is open, comparing SAVED observations, approval evidence and current controls. It is not a fresh retailer/Keepa API refresh. Stale or failed required evidence holds further buying conservatively until Research/Analysis are refreshed and reapproved. Price drops and known sale dates are displayed for review, including completed targets, without authorizing more units. Hosted scheduling, route optimization, automatic inventory reconciliation and four-to-six-week seller-share quantity guidance remain deferred.
 
-API facts and exact title evidence remain visible alongside editable values and individual review states. Conflicting values stay unknown until the reviewer resolves them. The size basis inferred from title layout is labeled and requires human review. All extraction is conservative rules, not a general AI interpretation of arbitrary titles.
+CSV exports for Excel cover source fields, analyses/decisions, targets, purchases, payments, submissions and deal alerts. Original matching/UPC reports and histories can also be exported. Formula-like spreadsheet cells are escaped.
 
-Save draft retains work without confirming it. Confirm reviewed fields records the human review; incomplete records become Reviewed with gaps. A fully reviewed identity is not a purchase approval and does not trigger Amazon matching. Corrections outside source suggestions or conflicts require a short explanatory note. The reviewer name is a local history label, not an authenticated identity.
+## Access and storage boundaries
 
-One enrichment record is shared across warehouse offers for a club product. Profiles and append-only revision history are separate from original Research data. Price/timestamp-only rescans do not invalidate identity review. Title, package facts, UPC, image-link or other identity changes retain corrections and mark them for recheck. Optimistic revision checks and product-row locks prevent silent concurrent overwrites. Browser edits stay in the mounted review when navigating between sidebar modules; reloading/closing warns about unsaved work.
+The local service binds 127.0.0.1 only. Before account setup it runs as Local manager, relying on access to this computer. Creating the first full-access account enables sign-in for all operational APIs. Additional authorized users have equal full access; workers get a separate mobile screen and server-enforced restrictions. Passwords use per-user salts and scrypt; login sessions use random hashed tokens, HttpOnly/SameSite cookies and 12-hour expiration with login throttling. Workers cannot access Research, credentials, profit settings, approvals, payments or managerial analysis snapshots. Local session/origin/host checks remain in place.
 
-Photo analysis is explicitly disconnected. API photo links are available for manual viewing, but the app does not download or interpret images in this release. Enrichment CSV/JSON exports include field review states and evidence. See UPGRADE_FROM_0_1.txt before reusing existing Jason data; migration 002 adds tables without replacing Research or legacy corrections.
+Scavio and Keepa keys remain server-side in memory, environment variables or Windows-encrypted storage. They are never returned to the UI, bundled or committed. Session-only keys disappear when the service closes. Windows encryption is tied to the Windows account. Environment settings SCAVIO_API_KEY and KEEPA_API_KEY take precedence. PGlite is the default; DATABASE_URL selects the existing PostgreSQL-server path. Shared TLS hosting, deployment, remote access, production backups/account recovery and server operations must be established before using the app from other devices. GitHub stores code, not a shared running database.
 
-## Exact matching first and UPC evidence
+## Verification and remaining integrations
 
-The first matching stage compares only the exact product and package. It preserves multiple child-ASIN candidates and does not choose a single highest-scoring result. A separately developed broader-search or alternate-pack engine is deferred; Potential matches is a holding tab for supplied candidates that do not qualify as exact.
+Tests use synthetic provider fixtures and real embedded PostgreSQL. They cover Research completeness/recovery, extraction/history, exact matching and UPC discovery, financial gates, approval snapshots, reservations, idempotent purchasing, receipt deduplication/reconciliation, paid-work adjustments, concurrent pay prevention and role enforcement. Browser checks exercise the manager calculation/approval/purchase/pay sequence and the separate worker phone screen. Portable runtime checks validate the extracted ZIP and restart persistence.
 
-Primary exact matching requires verified full-package UPC/GTIN evidence on both sides and reviewed package facts. Brand, count, size/basis, flavor, scent, strength and formulation conflicts stop an exact match even when a barcode agrees. Missing facts remain Needs information. Known identity mismatches are excluded. A pack-only alternative is parked in Potential matches without a conversion, split, rebundle or additional search.
+No live Scavio, Keepa, Amazon SP-API, RevSeller or paid image request was made during this build. Live coverage, provider account permissions, actual response shapes, fee completeness, tokens and timestamps require the user's pilot. External PostgreSQL hosting is untested. The Windows DPAPI round-trip test may explicitly skip in the automated Windows logon; interactive encrypted-key verification remains necessary. Successful fixture tests do not prove live matching accuracy or seller eligibility.
 
-The previously agreed fallback remains: if all required reviewed identity fields agree strictly but package UPC verification is absent, the candidate may enter the normal exact-review tab with an explicit UPC unverified flag. It is not labeled a verified UPC match. No title-similarity score substitutes for exact field agreement.
-
-The live Amazon/Keepa catalog connector is not connected in this version. Candidate ASINs and Amazon package facts are entered manually with source evidence and a reviewer label. Local extraction can suggest details from the supplied Amazon title; those remain unreviewed until accepted. This lets the exact-match logic and review workflow be tested before connecting live discovery.
-
-UPC evidence comes from explicit API barcode fields, a printed package barcode, retailer/manufacturer specifications or a GS1 cross-check. Club SKUs and item numbers are never inferred to be UPCs. A GS1 Modulo 10 check validates the composition of a GTIN string, not ownership or correct package identity. Leading zeroes are preserved; equivalent UPC-A/EAN encodings compare through GTIN-14 padding, without stripping a nonzero packaging indicator. UPC-E expansion is not implemented; 8-digit inputs require an actual GTIN-8 identity.
-
-Each UPC record identifies the full club package, an individual inner unit, or unknown scope. Only verified current-source full-package evidence participates in verified UPC matching. An inner bottle barcode does not establish a club 10-pack match. Manual changes retain revision history; stale source evidence requires rechecking. Candidate history is immutable and results are recalculated against current club details.
-
-An optional manual **Check retailer details** button calls Scavio's documented Costco product endpoint for the exact saved retailer ID. The provider documents 1 credit if uncached. The response must identify exactly the requested item before UPC suggestions are collected. The complete lookup evidence and original date are retained separately; no source history is rewritten and no UPC is automatically verified. The provider does not guarantee that a UPC will be returned. No such live request was made during development.
-
-An offline audit of the user's original 39-record handoff found no nonempty explicit UPC/GTIN/barcode fields. Additional evidence is therefore needed for those saved records. Photo analysis remains disconnected.
-
-References: https://scavio.dev/docs/costco-product and https://www2.gs1.org/services/verified-by-gs1 and https://ref.gs1.org/standards/genspecs/19.0.0/
-
-## Verification boundaries
-
-Automated tests use synthetic provider fixtures and the real embedded PostgreSQL engine. They cover multi-page/247-item scans, no price ceiling, scoping, retries, stop/resume, concurrency, transactional rollback, immutable history, stale-cache behavior, diagnostics, redaction, formatted credit balances, local API access checks, exports, disk persistence and memory-only key storage. The synthetic Windows DPAPI round-trip test explicitly skips if the automated logon context cannot encrypt. This occurred on the build machine; encrypted storage still requires an interactive test under the user's normal Windows account.
-
-Browser checks use the synthetic demo. No real Scavio search, paid API call, Keepa/Amazon connection, retailer login or hosted PostgreSQL server was used. The external PostgreSQL driver path needs an integration run against the selected server. Actual provider response shape/coverage and available credits still require a user-run live pilot.
-
-Additional tests cover title extraction, ambiguous counts, API/title conflicts, manual draft/confirmation history, incomplete identities, invalid values, concurrent review conflicts, rescan persistence and changed-source rechecks. Browser checks exercise editing, saving, reopening, review status and history on desktop/mobile layouts. These use synthetic data; the extraction rules are not guaranteed to understand every SKU.
-
-New matching tests cover GTIN checks, leading zeroes, explicit-field UPC extraction, exact package gates, UPC-unverified flags, parked alternatives, excluded mismatches, immutable evidence, current-source recalculation and retailer-detail response identity checks. No live Amazon/Keepa discovery or external barcode service was tested.
-
-Photo analysis, the secondary matching engine, live catalog discovery, ROI, purchase approvals, buying/worker operations, scheduling and SMS remain later modules. Research, Enrichment and exact matching do not authorize purchases.
-
-## Provider references checked for this implementation
-
-- https://scavio.dev/docs/costco-category
-- https://scavio.dev/docs/costco-categories
-- https://scavio.dev/docs/costco-deals
-- https://scavio.dev/docs/costco-coupons
-- https://scavio.dev/docs/costco-warehouses
-- https://scavio.dev/docs/usage
-- https://pglite.dev/docs/
-- https://node-postgres.com/features/transactions
+References checked: https://scavio.dev/docs/costco-product ; https://scavio.dev/docs/google-custom-search-api ; https://scavio.dev/docs/extract ; https://keepa.com/api-docs/product.html ; https://keepa.com/api-docs/product-object.html ; https://keepa.com/api-docs/statistics-object.html ; https://keepa.com/api-docs/request-basics.html ; https://www2.gs1.org/services/verified-by-gs1

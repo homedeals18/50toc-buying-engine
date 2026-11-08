@@ -1,9 +1,11 @@
 {
   "name": "50toc-jason-research",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
-  "engines": {"node": ">=24"},
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "build": "node scripts/build.mjs",
     "start": "node server/main.mjs",
@@ -16,5 +18,7 @@
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
-  "devDependencies": {"esbuild": "0.28.2"}
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
 }

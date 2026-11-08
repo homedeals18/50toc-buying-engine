@@ -6,9 +6,9 @@ import {createHash} from 'node:crypto';
 import {AppError,eventFor,redact,nonnegativeNumber} from './errors.mjs';
 
 export class KeyVault {
-  constructor(dir){this.path=path.join(dir,'scavio.key');this.value=null;this.memoryOnly=false;}
-  configured(){return Boolean(process.env.SCAVIO_API_KEY||this.value||existsSync(this.path));}
-  mode(){return process.env.SCAVIO_API_KEY?'server environment':this.memoryOnly?'session only':existsSync(this.path)?'encrypted Windows storage':'not configured';}
+  constructor(dir,{name='scavio',envName='SCAVIO_API_KEY'}={}){this.path=path.join(dir,name+'.key');this.envName=envName;this.name=name;this.value=null;this.memoryOnly=false;}
+  configured(){return Boolean(process.env[this.envName]||this.value||existsSync(this.path));}
+  mode(){return process.env[this.envName]?'server environment':this.memoryOnly?'session only':existsSync(this.path)?'encrypted Windows storage':'not configured';}
   async invoke(mode,key){
     if(process.platform!=='win32')throw new AppError('KEY_STORAGE_UNAVAILABLE','Use the server SCAVIO_API_KEY environment setting on this operating system.');
     return new Promise((resolve,reject)=>{
@@ -33,9 +33,9 @@ export class KeyVault {
       child.stdin.end(JSON.stringify({mode,path:this.path,key}));
     });
   }
-  async read(){if(process.env.SCAVIO_API_KEY)return process.env.SCAVIO_API_KEY;if(!this.configured())throw new AppError('KEY_NOT_SAVED','Save your Scavio key in Settings first.');return this.value??=(await this.invoke('read')).key;}
+  async read(){if(process.env[this.envName])return process.env[this.envName];if(!this.configured())throw new AppError('KEY_NOT_SAVED','Save the connection key in Settings first.');return this.value??=(await this.invoke('read')).key;}
   validateKey(key){
-    if(process.env.SCAVIO_API_KEY)throw new AppError('KEY_MANAGED_BY_SERVER','This connection is managed by the server environment.');
+    if(process.env[this.envName])throw new AppError('KEY_MANAGED_BY_SERVER','This connection is managed by the server environment.');
     if(typeof key!=='string'||key.length<8||key.length>512||/[\s"'\u0000-\u001f]/.test(key))throw new AppError('KEY_INPUT_INVALID','Paste only the API key, without quotes or spaces.');
   }
   async save(key,{sessionOnly=false}={}){
@@ -45,7 +45,7 @@ export class KeyVault {
   }
 }
 
-const endpoints=new Set(['usage','costco/categories','costco/category','costco/deals','costco/coupons','costco/warehouses','costco/product']);
+const endpoints=new Set(['usage','costco/categories','costco/category','costco/deals','costco/coupons','costco/warehouses','costco/product','google/customsearch','extract']);
 export class ScavioProvider {
   constructor(store,vault,{fetcher=fetch,timeout=120000}={}){Object.assign(this,{store,vault,fetcher,timeout});}
   configured(){return this.vault.configured();}

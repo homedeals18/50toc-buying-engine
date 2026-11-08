@@ -4,6 +4,7 @@ import {syncProductProfile,validateFields} from './enrichment.mjs';
 import {fieldDefinitions,extractDetails} from './enrichment-fields.mjs';
 import {validateGtin,identifierCandidates,evidenceUrl} from './identifiers.mjs';
 import {exactMatch} from './exact-rules.mjs';
+import {sameRetailerItem} from './upc-evidence.mjs';
 const ns='jason_research.',json=JSON.stringify;
 function text(input,name,limit=500,{required=false}={}){
   if(typeof input!=='string'||input.length>limit||/[\u0000-\u001f]/.test(input)||required&&!input.trim())throw new AppError('MATCH_INPUT_INVALID','Enter valid '+name+'.');
@@ -27,11 +28,13 @@ export class MatchingService{
     const profiles=(await this.db.query('SELECT body FROM '+ns+'enrichment_profiles ORDER BY updated_at DESC,product_key')).rows.map(r=>r.body);
     const upcs=new Map((await this.db.query('SELECT product_key,body FROM '+ns+'product_upcs')).rows.map(r=>[r.product_key,r.body]));
     const candidates=(await this.db.query('SELECT product_key,body FROM '+ns+'amazon_candidates')).rows;
-    return {liveCatalogConnected:false,secondaryEngineConnected:false,products:profiles.map(p=>{
+    const reports=new Map((await this.db.query('SELECT DISTINCT ON(product_key) product_key,body FROM '+ns+'upc_lookup_reports ORDER BY product_key,observed_at DESC')).rows.map(r=>[r.product_key,r.body]));
+    return {liveCatalogConnected:this.catalogConnected?.()??false,secondaryEngineConnected:false,products:profiles.map(p=>{
       const barcode=upcs.get(p.productKey);
       const counts={exact:0,potential:0,needs_information:0,mismatch:0};
       for(const c of candidates.filter(c=>c.product_key===p.productKey))counts[exactMatch(p,barcode,c.body).route]++;
-      return {productKey:p.productKey,title:p.title,itemNumber:p.itemNumber,counts,
+      const lookup=reports.get(p.productKey);
+      return {productKey:p.productKey,title:p.title,itemNumber:p.itemNumber,counts,upcLookupStatus:barcode?.status==='verified'&&barcode.scope==='club_package'&&barcode.sourceSignature===p.sourceSignature?'package_verified':lookup?lookup.sourceSignature!==p.sourceSignature?'recheck_needed':lookup.summary?.status??'in_progress':'not_checked',
         upcStatus:barcode?.status==='verified'&&barcode.sourceSignature===p.sourceSignature?barcode.scope==='club_package'?'package_verified':'inner_unit_only':'needs_upc'};
     })};
   }
@@ -41,13 +44,14 @@ export class MatchingService{
       const upc=(await db.query('SELECT body FROM '+ns+'product_upcs WHERE product_key=$1',[key])).rows[0]?.body??null;
       const offers=(await db.query('SELECT body FROM '+ns+'offers WHERE product_id=$1',[key])).rows.map(r=>r.body);
       const lookups=(await db.query('SELECT body FROM '+ns+'identity_lookups WHERE product_key=$1 ORDER BY observed_at DESC',[key])).rows.map(r=>r.body);
-      const suggestions=offers.flatMap(o=>identifierCandidates({upc:o.upc,sourceData:o.sourceData},'Saved retailer API'));
-      suggestions.push(...lookups.flatMap(l=>identifierCandidates(l.product,'Retailer detail lookup')));
+      const suggestions=offers.flatMap(o=>identifierCandidates({upc:o.upc,sourceData:o.sourceData},'Saved retailer API').map(s=>({...s,observedAt:o.observedAt,cached:o.sourceCached===true})));
+      suggestions.push(...lookups.filter(l=>l.sourceSignature===profile.sourceSignature).flatMap(l=>identifierCandidates(l.product,'Retailer detail lookup').map(s=>({...s,observedAt:l.observedAt,cached:l.cached}))));
+      const upcLookup=(await db.query('SELECT body FROM '+ns+'upc_lookup_reports WHERE product_key=$1 ORDER BY observed_at DESC LIMIT 1',[key])).rows[0]?.body??null;
       const candidates=(await db.query('SELECT body FROM '+ns+'amazon_candidates WHERE product_key=$1 ORDER BY asin',[key])).rows.map(r=>r.body);
       const history=(await db.query('SELECT revision,created_at,body FROM '+ns+'upc_history WHERE product_key=$1 ORDER BY revision DESC',[key])).rows;
       return {profile,fieldDefinitions,upc,suggestions:[...new Map(suggestions.map(s=>[json([s.source,s.path,s.raw]),s])).values()],
-        upcHistory:history,lookups,candidates:candidates.map(c=>({...c,result:exactMatch(profile,upc,c)})),
-        liveCatalogConnected:false,secondaryEngineConnected:false};
+        upcHistory:history,lookups,upcLookup,candidates:candidates.map(c=>({...c,result:exactMatch(profile,upc,c)})),
+        liveCatalogConnected:this.catalogConnected?.()??false,secondaryEngineConnected:false};
     });
   }
   async saveUpc(key,input){
@@ -112,7 +116,7 @@ export class MatchingService{
       const response=await this.provider.call('costco/product',{country:'us',item_ids:[id]});
       const products=response.json?.data?.products;
       if(!Array.isArray(products))throw new AppError('DETAIL_SCHEMA_CHANGED','The retailer detail response could not be read.',{status:502,stage:'response'});
-      const match=products.filter(p=>p&&([p.product_id,p.productId,p.item_number,p.itemNumber].some(v=>v!==null&&v!==undefined&&[source.productId,source.itemNumber].filter(Boolean).includes(String(v)))));
+      const match=products.filter(p=>p&&sameRetailerItem(p,source));
       if(match.length!==1)throw new AppError('DETAIL_IDENTITY_UNVERIFIED','The detail response could not be tied to exactly one saved club item. No UPC was accepted.',{status:502,stage:'response'});
       const record={product:match[0],observedAt:response.observedAt,cached:response.cached,source:'Scavio product details',sourceSignature:context.profile.sourceSignature};
       await this.db.transaction(async db=>{
