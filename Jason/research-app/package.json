@@ -1,0 +1,20 @@
+{
+  "name": "50toc-jason-research",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {"node": ">=24"},
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node server/main.mjs",
+    "demo": "node server/main.mjs --demo",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.15",
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {"esbuild": "0.28.2"}
+}
