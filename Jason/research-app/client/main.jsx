@@ -2,6 +2,7 @@ import React,{useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import './styles.css';
 import Enrichment from './Enrichment.jsx';
+import Matching from './Matching.jsx';
 
 const token=document.querySelector('meta[name="50toc-session"]').content;
 async function api(path,body){
@@ -92,8 +93,8 @@ function App(){
   return <div className="app">
     <aside className="sidebar"><a href="#research" className="brand" onClick={e=>{e.preventDefault();navigate('research');}}>50<span>TOC</span><small>BUYING ENGINE</small></a>
       <div className="workspace-label">JASON WORKSPACE</div>
-      <nav aria-label="Main navigation">{[['research','⌕','Research'],['library','▤','Research library'],['enrichment','◇','Enrichment'],['analysis','▥','Analysis'],['approvals','✓','Approvals'],['buying','▣','Worker / Buyer'],['scheduling','◷','Scheduling'],['settings','⚙','Settings / APIs']].map(([id,icon,label])=><button key={id} className={view===id?'nav active':'nav'} onClick={()=>navigate(id)} aria-current={view===id?'page':undefined}><span aria-hidden="true">{icon}</span>{label}{!['research','library','enrichment','settings'].includes(id)&&<small>Later</small>}</button>)}</nav>
-      <div className="sidebar-footer"><span className={'dot '+(state.configured?'connected':'')}/>{state.demo?'Demonstration':state.configured?'Scavio configured':'Scavio not connected'}<small>Costco first · Research 0.2</small></div>
+      <nav aria-label="Main navigation">{[['research','⌕','Research'],['library','▤','Research library'],['enrichment','◇','Enrichment'],['matching','≡','Exact matching'],['analysis','▥','Analysis'],['approvals','✓','Approvals'],['buying','▣','Worker / Buyer'],['scheduling','◷','Scheduling'],['settings','⚙','Settings / APIs']].map(([id,icon,label])=><button key={id} className={view===id?'nav active':'nav'} onClick={()=>navigate(id)} aria-current={view===id?'page':undefined}><span aria-hidden="true">{icon}</span>{label}{!['research','library','enrichment','matching','settings'].includes(id)&&<small>Later</small>}</button>)}</nav>
+      <div className="sidebar-footer"><span className={'dot '+(state.configured?'connected':'')}/>{state.demo?'Demonstration':state.configured?'Scavio configured':'Scavio not connected'}<small>Costco first · Research 0.3</small></div>
     </aside>
     <main><header className="topbar"><span>50TOC / {view==='settings'?'Connections':view==='library'?'Saved research':title(view)}</span><span className="mode">{state.demo?'DEMO · No API credits used':'LOCAL DEVELOPMENT'}</span></header>
       <div className="content">
@@ -101,6 +102,7 @@ function App(){
         {error&&<div role="alert" className="alert error">{error}<button onClick={()=>setError('')} aria-label="Dismiss error">×</button></div>}
         {notice&&<div role="status" className="alert success">{notice}</div>}
         <Enrichment active={view==='enrichment'} api={api} demo={state.demo} refreshKey={state.jobs.map(j=>j.id+j.pages+j.status).join('|')} requestedProduct={enrichProduct} onRequestHandled={()=>setEnrichProduct(null)}/>
+        <Matching active={view==='matching'} api={api} demo={state.demo} refreshKey={state.jobs.map(j=>j.id+j.pages+j.status).join('|')}/>
         {['research','library'].includes(view)?<>
           <div className="page-heading"><div><div className="eyebrow">SOURCE & DISCOVER</div><h1>{view==='research'?'Costco Research':'Research library'}</h1><p>{view==='research'?'Choose where to look and which deals to collect.':'Your saved products, warehouse offers and original source evidence.'}</p></div><span className="phase">PHASE 01</span></div>
           {view==='research'&&<>
@@ -143,7 +145,7 @@ function App(){
           </section>
           <section className="settings-card"><h2>Sourcing flags</h2><p>These flags send uncertain products to Needs information; they do not approve purchases.</p>{[['flagVariety','Flag mixed or variety packs'],['flagPerishable','Flag refrigerated or perishable items']].map(([id,label])=><label className="choice" key={id}><input type="checkbox" checked={state.rules[id]!==false} disabled={busy||scanning} onChange={e=>run(async()=>{await api('rules',{...state.rules,[id]:e.target.checked});await refresh();})}/>{label}</label>)}</section>
           <section className="settings-card"><h2>Storage & diagnostics</h2><p>{state.databaseMode}. This build is available on this computer only. Shared hosting and user sign-in will be added before remote access.</p><p>No Keepa connection, price ceiling, AI usage or purchase automation in this module.</p><button disabled={busy} onClick={()=>run(async()=>setDiagnostics((await api('diagnostics')).events))}>Show safe diagnostics</button>{diagnostics&&<pre className="raw">{JSON.stringify(diagnostics,null,2)}</pre>}</section>
-        </>:view==='enrichment'?null:<section className="future-module"><div className="eyebrow">A LATER PHASE</div><h1>{view==='buying'?'Worker / Buyer':title(view)}</h1><p>This module is part of the agreed structure. We are building and testing Research and Enrichment before adding this phase.</p><button className="primary" onClick={()=>navigate('research')}>Return to Research</button></section>}
+        </>:['enrichment','matching'].includes(view)?null:<section className="future-module"><div className="eyebrow">A LATER PHASE</div><h1>{view==='buying'?'Worker / Buyer':title(view)}</h1><p>This module is part of the agreed structure. We are building and testing Research and Enrichment before adding this phase.</p><button className="primary" onClick={()=>navigate('research')}>Return to Research</button></section>}
       </div>
     </main>
     {detail&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setDetail(null);}}><section className="dialog" role="dialog" aria-modal="true" aria-labelledby="detail-title"><div className="dialog-top"><span className="eyebrow">SAVED RESEARCH EVIDENCE</span><button ref={detailClose} onClick={()=>setDetail(null)} aria-label="Close product details">Close ×</button></div><h2 id="detail-title">{detail.title}</h2><p>Item {detail.itemNumber||'not supplied'} · Warehouse #{detail.warehouseId}</p><div className="detail-prices"><div><small>Warehouse price</small><strong>{money(detail.warehousePrice)}</strong></div><div><small>Online price</small><strong>{money(detail.onlinePrice)}</strong></div><div><small>Observed</small><strong>{time(detail.observedAt)}</strong></div></div>

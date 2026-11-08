@@ -1,6 +1,6 @@
-# 50TOC — Jason Research and Enrichment 0.2
+# 50TOC — Jason Research Enrichment and Exact Matching 0.3
 
-Costco Research plus product Enrichment fields and human review in Jason: React, a Node.js service, and PostgreSQL storage. All code is under this directory. The inherited frontend, Python backend, other extractors, and main branch are unchanged.
+Costco Research, product Enrichment and the first exact-match stage in Jason: React, a Node.js service, and PostgreSQL storage. All code is under this directory. The inherited matching engine is not used by the new exact matcher. The inherited application directories and main branch remain unchanged.
 
 ## Try it on Windows
 
@@ -78,6 +78,26 @@ One enrichment record is shared across warehouse offers for a club product. Prof
 
 Photo analysis is explicitly disconnected. API photo links are available for manual viewing, but the app does not download or interpret images in this release. Enrichment CSV/JSON exports include field review states and evidence. See UPGRADE_FROM_0_1.txt before reusing existing Jason data; migration 002 adds tables without replacing Research or legacy corrections.
 
+## Exact matching first and UPC evidence
+
+The first matching stage compares only the exact product and package. It preserves multiple child-ASIN candidates and does not choose a single highest-scoring result. A separately developed broader-search or alternate-pack engine is deferred; Potential matches is a holding tab for supplied candidates that do not qualify as exact.
+
+Primary exact matching requires verified full-package UPC/GTIN evidence on both sides and reviewed package facts. Brand, count, size/basis, flavor, scent, strength and formulation conflicts stop an exact match even when a barcode agrees. Missing facts remain Needs information. Known identity mismatches are excluded. A pack-only alternative is parked in Potential matches without a conversion, split, rebundle or additional search.
+
+The previously agreed fallback remains: if all required reviewed identity fields agree strictly but package UPC verification is absent, the candidate may enter the normal exact-review tab with an explicit UPC unverified flag. It is not labeled a verified UPC match. No title-similarity score substitutes for exact field agreement.
+
+The live Amazon/Keepa catalog connector is not connected in this version. Candidate ASINs and Amazon package facts are entered manually with source evidence and a reviewer label. Local extraction can suggest details from the supplied Amazon title; those remain unreviewed until accepted. This lets the exact-match logic and review workflow be tested before connecting live discovery.
+
+UPC evidence comes from explicit API barcode fields, a printed package barcode, retailer/manufacturer specifications or a GS1 cross-check. Club SKUs and item numbers are never inferred to be UPCs. A GS1 Modulo 10 check validates the composition of a GTIN string, not ownership or correct package identity. Leading zeroes are preserved; equivalent UPC-A/EAN encodings compare through GTIN-14 padding, without stripping a nonzero packaging indicator. UPC-E expansion is not implemented; 8-digit inputs require an actual GTIN-8 identity.
+
+Each UPC record identifies the full club package, an individual inner unit, or unknown scope. Only verified current-source full-package evidence participates in verified UPC matching. An inner bottle barcode does not establish a club 10-pack match. Manual changes retain revision history; stale source evidence requires rechecking. Candidate history is immutable and results are recalculated against current club details.
+
+An optional manual **Check retailer details** button calls Scavio's documented Costco product endpoint for the exact saved retailer ID. The provider documents 1 credit if uncached. The response must identify exactly the requested item before UPC suggestions are collected. The complete lookup evidence and original date are retained separately; no source history is rewritten and no UPC is automatically verified. The provider does not guarantee that a UPC will be returned. No such live request was made during development.
+
+An offline audit of the user's original 39-record handoff found no nonempty explicit UPC/GTIN/barcode fields. Additional evidence is therefore needed for those saved records. Photo analysis remains disconnected.
+
+References: https://scavio.dev/docs/costco-product and https://www2.gs1.org/services/verified-by-gs1 and https://ref.gs1.org/standards/genspecs/19.0.0/
+
 ## Verification boundaries
 
 Automated tests use synthetic provider fixtures and the real embedded PostgreSQL engine. They cover multi-page/247-item scans, no price ceiling, scoping, retries, stop/resume, concurrency, transactional rollback, immutable history, stale-cache behavior, diagnostics, redaction, formatted credit balances, local API access checks, exports, disk persistence and memory-only key storage. The synthetic Windows DPAPI round-trip test explicitly skips if the automated logon context cannot encrypt. This occurred on the build machine; encrypted storage still requires an interactive test under the user's normal Windows account.
@@ -86,7 +106,9 @@ Browser checks use the synthetic demo. No real Scavio search, paid API call, Kee
 
 Additional tests cover title extraction, ambiguous counts, API/title conflicts, manual draft/confirmation history, incomplete identities, invalid values, concurrent review conflicts, rescan persistence and changed-source rechecks. Browser checks exercise editing, saving, reopening, review status and history on desktop/mobile layouts. These use synthetic data; the extraction rules are not guaranteed to understand every SKU.
 
-Photo analysis, Amazon matching, ROI, purchase approvals, buying/worker operations, scheduling and SMS remain later modules. Sidebar entries mark that status explicitly. Research and Enrichment do not authorize purchases.
+New matching tests cover GTIN checks, leading zeroes, explicit-field UPC extraction, exact package gates, UPC-unverified flags, parked alternatives, excluded mismatches, immutable evidence, current-source recalculation and retailer-detail response identity checks. No live Amazon/Keepa discovery or external barcode service was tested.
+
+Photo analysis, the secondary matching engine, live catalog discovery, ROI, purchase approvals, buying/worker operations, scheduling and SMS remain later modules. Research, Enrichment and exact matching do not authorize purchases.
 
 ## Provider references checked for this implementation
 

@@ -45,7 +45,7 @@ export class KeyVault {
   }
 }
 
-const endpoints=new Set(['usage','costco/categories','costco/category','costco/deals','costco/coupons','costco/warehouses']);
+const endpoints=new Set(['usage','costco/categories','costco/category','costco/deals','costco/coupons','costco/warehouses','costco/product']);
 export class ScavioProvider {
   constructor(store,vault,{fetcher=fetch,timeout=120000}={}){Object.assign(this,{store,vault,fetcher,timeout});}
   configured(){return this.vault.configured();}

@@ -51,7 +51,7 @@ export async function syncProductProfile(db,productKey){
   return profile;
 }
 
-function validateFields(input){
+export function validateFields(input){
   if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!fieldDefinitions.some(f=>f.id===k)))
     throw new AppError('ENRICHMENT_FIELDS_INVALID','The review fields are not valid.');
   const fields={};

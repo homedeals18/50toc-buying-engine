@@ -15,6 +15,7 @@ export class DemoProvider {
     let data;
     if(endpoint==='costco/categories')data={categories};
     else if(endpoint==='costco/warehouses')data={warehouses:[{warehouse_id:'1062',name:'Example Warehouse North',address:'Synthetic demonstration location'},{warehouse_id:'306',name:'Example Warehouse South',address:'Synthetic demonstration location'}]};
+    else if(endpoint==='costco/product')data={products:[{...items[0],specifications:[{name:'UPC',value:'012345678905'}]}]};
     else if(endpoint==='costco/coupons')data={valid_from:'2026-11-01',valid_to:'2026-11-30',coupons:[{...items[0],discount:{amount_off:3,final_price:16.97},applies_to:'warehouse'}]};
     else {
       const page=body.page??1;

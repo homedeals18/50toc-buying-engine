@@ -10,6 +10,7 @@ import {dealTypes,categoriesFrom,planScan,coverage} from './costco.mjs';
 import {toCsv} from './export.mjs';
 import {EnrichmentService} from './enrichment.mjs';
 import {fieldDefinitions} from './enrichment-fields.mjs';
+import {MatchingService} from './matching.mjs';
 
 export async function createApp({db,dataDir,provider:injectedProvider,vault:injectedVault,retryDelay=1500,demo=false}){
   const store=new Store(db),vault=injectedVault??new KeyVault(dataDir),provider=injectedProvider??new ScavioProvider(store,vault);
@@ -17,6 +18,7 @@ export async function createApp({db,dataDir,provider:injectedProvider,vault:inje
   await engine.initialize();
   const enrichment=new EnrichmentService(store);
   enrichment.initialize();
+  const matching=new MatchingService(store,enrichment,provider);
   let base;
   const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer',
     'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://gdx-assets.costco.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"};
@@ -45,7 +47,7 @@ export async function createApp({db,dataDir,provider:injectedProvider,vault:inje
         if(!body||typeof body!=='object'||Array.isArray(body))throw new AppError('JSON_REQUIRED','A JSON object is required.');
       }
       if(p==='/api/state'&&req.method==='GET'){
-        send(res,{version:'Jason Research 0.2',demo,databaseMode:db.mode,configured:provider.configured(),keyStorageMode:demo?'demo':vault.mode(),enrichmentPreparing:enrichment.preparing,
+        send(res,{version:'Jason Research 0.3',demo,databaseMode:db.mode,configured:provider.configured(),keyStorageMode:demo?'demo':vault.mode(),enrichmentPreparing:enrichment.preparing,
           categories:await store.get('categories',[]),warehouses:await store.get('warehouses',[]),
           preferences:await store.get('preferences',{warehouses:[],categoryIds:[],dealTypes:['clearance','manager_markdown']}),
           rules:await store.get('rules',{flagVariety:true,flagPerishable:true}),jobs:await store.jobs(),dealTypes,coverage,priceLimit:null,analysisConnected:false});return;
@@ -108,6 +110,21 @@ export async function createApp({db,dataDir,provider:injectedProvider,vault:inje
         else send(res,{schema:'50toc.enrichment.v1',exportedAt:new Date().toISOString(),photoAnalysis:'not_connected',products:rows});
         return;
       }
+      if(p==='/api/matching'&&req.method==='GET'){send(res,await matching.list());return;}
+      if(p==='/api/matching/product'&&req.method==='GET'){send(res,await matching.get(url.searchParams.get('productKey')));return;}
+      if(p==='/api/matching/upc'&&req.method==='POST'){send(res,await matching.saveUpc(body.productKey,body));return;}
+      if(p==='/api/matching/candidate-title'&&req.method==='POST'){send(res,matching.parseCandidate(body));return;}
+      if(p==='/api/matching/candidate'&&req.method==='POST'){send(res,await matching.saveCandidate(body.productKey,body));return;}
+      if(p==='/api/matching/history'&&req.method==='GET'){send(res,{history:await matching.candidateHistory(url.searchParams.get('productKey'),url.searchParams.get('asin'))});return;}
+      if(p==='/api/matching/retailer-details'&&req.method==='POST'){
+        if(engine.running)throw new AppError('SCAN_ACTIVE','Wait for the Research scan to finish before a separate detail lookup.',{status:409});
+        send(res,await matching.retailerDetails(body.productKey));return;
+      }
+      if(p==='/api/matching/export'&&req.method==='GET'){
+        const products=(await matching.list()).products,records=[];
+        for(const product of products)records.push(await matching.get(product.productKey));
+        send(res,{schema:'50toc.exact-matches.v1',exportedAt:new Date().toISOString(),records,liveCatalogConnected:false,secondaryEngineConnected:false});return;
+      }
       throw new AppError('NOT_FOUND','Not found.',{status:404});
     }catch(error){
       const e=error instanceof AppError?error:new AppError('LOCAL_ERROR','The operation failed. Saved research is retained.',{status:500,stage:'local'});
@@ -117,7 +134,7 @@ export async function createApp({db,dataDir,provider:injectedProvider,vault:inje
       send(res,safeError(e),e.status);
     }
   });
-  return {server,store,engine,provider,session,enrichment,
+  return {server,store,engine,provider,session,enrichment,matching,
     async listen(port=8876){await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});base='http://127.0.0.1:'+server.address().port;return base;},
     async close(){await engine.close();await enrichment.close();await new Promise(resolve=>server.close(resolve));await db.close();}
   };
