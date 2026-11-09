@@ -1,10 +1,10 @@
-# 50TOC — Jason Core Buying Workflow 0.5
+# 50TOC — Jason Core Buying Workflow 0.6
 
 A local web application with React, Node 24 and PostgreSQL. The Windows package includes Node and embedded PostgreSQL (PGlite); no Python, Node or database installation is needed. All changes live under Jason. The inherited application directories and main branch remain untouched.
 
 ## Start and upgrade
 
-Extract the whole Windows ZIP. Close any older 50TOC command window, then run START_RESEARCH.cmd for LIVE mode or START_DEMO.cmd for synthetic examples without API credits. Open http://127.0.0.1:8876 in Chrome, Edge or the ChatGPT browser on this computer. The footer must show Core workflow 0.5. Real key fields are deliberately disabled in DEMO. Leave the service open; computer sleep pauses local work.
+Extract the whole Windows ZIP. Close any older 50TOC command window, then run START_RESEARCH.cmd for LIVE mode or START_DEMO.cmd for synthetic examples without API credits. Open http://127.0.0.1:8876 in Chrome, Edge or the ChatGPT browser on this computer. The footer must show Core workflow 0.6. Real key fields are deliberately disabled in DEMO. Leave the service open; computer sleep pauses local work.
 
 The ZIP includes no user data or real keys. Read UPGRADE_FROM_0_1.txt and back up the entire old data folder before using existing Jason 0.1, 0.2 or 0.3 records. Never run two versions against the same database. Migrations are additive. The older Research Web 1.x SQLite prototype is a separate application and is not silently migrated.
 
@@ -12,7 +12,7 @@ TEST_GUIDE.txt provides the test sequence and limitations. Source development us
 
 ## Research and Enrichment
 
-Costco is the first active research connector. Select actual warehouses, departments and deal types. Markdown endings share one department task. All supported returned result pages and products are processed with no arbitrary product cap and no purchase-price ceiling. Warehouse observations remain distinct from online prices, source pages retain evidence, and server-owned jobs can stop/resume. Failed coverage is visible. Provider coverage does not mean every item physically in a warehouse.
+Costco and Sam’s Club are active Research connectors. Select actual warehouses, departments and deal types. Markdown endings share one department task. All supported returned result pages and products are processed with no arbitrary product cap and no purchase-price ceiling. Warehouse observations remain distinct from online prices, source pages retain evidence, and server-owned jobs can stop/resume. Failed coverage is visible. Provider coverage does not mean every item physically in a warehouse.
 
 Enrichment extracts local title/structured-field suggestions for product, pack, contents, size/basis, flavor, scent, formulation and strength. Human fields and history survive rescans. Packaging changes require rechecking; price-only changes do not erase identity work. Research saves photo links; automated photo interpretation remains disconnected.
 
@@ -66,6 +66,14 @@ Scavio and Keepa keys remain server-side in memory, environment variables or Win
 
 Tests use synthetic provider fixtures and real embedded PostgreSQL. They cover Research completeness/recovery, extraction/history, exact matching and UPC discovery, financial gates, approval snapshots, reservations, idempotent purchasing, receipt deduplication/reconciliation, paid-work adjustments, concurrent pay prevention and role enforcement. Browser checks exercise the manager calculation/approval/purchase/pay sequence and the separate worker phone screen. Portable runtime checks validate the extracted ZIP and restart persistence.
 
-No live Scavio, Keepa, Amazon SP-API, RevSeller or paid image request was made during this build. Live coverage, provider account permissions, actual response shapes, fee completeness, tokens and timestamps require the user's pilot. External PostgreSQL hosting is untested. The Windows DPAPI round-trip test may explicitly skip in the automated Windows logon; interactive encrypted-key verification remains necessary. Successful fixture tests do not prove live matching accuracy or seller eligibility.
+Earlier pilot calls returned real Costco and Keepa data. The new 0.6 Costco Prices and Sam’s Club endpoints remain untested live; provider coverage, response shapes, fee completeness and timestamps need live verification. Amazon SP-API, RevSeller and paid photo analysis remain unconnected. External PostgreSQL hosting is untested. The Windows DPAPI round-trip test may explicitly skip in the automated Windows logon; interactive encrypted-key verification remains necessary. Successful fixture tests do not prove live matching accuracy or seller eligibility.
 
 References checked: https://scavio.dev/docs/costco-product ; https://scavio.dev/docs/google-custom-search-api ; https://scavio.dev/docs/extract ; https://keepa.com/api-docs/product.html ; https://keepa.com/api-docs/product-object.html ; https://keepa.com/api-docs/statistics-object.html ; https://keepa.com/api-docs/request-basics.html ; https://www2.gs1.org/services/verified-by-gs1
+
+## Warehouse coupons and Sam’s Club (0.6)
+
+Costco results show warehouse price, verified final warehouse coupon price, online price and available promotion end dates separately. Verify warehouse coupons calls Scavio’s Costco Prices endpoint in batches of up to 20 item numbers and 9 warehouses. General online promotion text is not subtracted from warehouse prices. Unverified applicable coupons hold Analysis and buying. Raw promotion text and original source observations remain available. Date-only expiry uses the retailer calendar; missing years are never invented.
+
+Sam’s Club offers separate club selection, Instant Savings, Clearance and user-added department links/numbers. Discovery pages are not multiplied by selected clubs. All supported pages and matching products are collected without an arbitrary item or price cap. Selected-department Clearance uses department membership to exclude unrelated results. The feed chooses its own nearby club: its price is labelled Discovery price, not attributed to the selected club. Plan selected-club checks estimates one product request per item per club before starting the resumable verification queue. Item and club IDs must both agree before using club_price. Final prices already include savings. Purchase limits and capped provider quantities are not exact inventory. New products enter shared Enrichment; UPC suggestions still require full-package verification. Automatic web UPC lookup remains Costco-only.
+
+The 0.6 changes were tested using synthetic responses and saved public Costco evidence. No live call to the new Costco Prices or Sam’s endpoints was made from 0.6 because the real keys remain session-only in the separate running 0.5 test process. Earlier real Costco and Keepa results do not validate these new endpoint integrations. Test these live before using their prices for buying decisions. Automatic photo interpretation and learned-rule suggestions remain unconnected. No credentials or live data are included in the package.

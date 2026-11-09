@@ -45,7 +45,7 @@ export class KeyVault {
   }
 }
 
-const endpoints=new Set(['usage','costco/categories','costco/category','costco/deals','costco/coupons','costco/warehouses','costco/product','google/customsearch','extract']);
+const endpoints=new Set(['usage','costco/categories','costco/category','costco/deals','costco/coupons','costco/warehouses','costco/product','costco/prices','samsclub/category','samsclub/savings','samsclub/product','samsclub/clubs','google/customsearch','extract']);
 export class ScavioProvider {
   constructor(store,vault,{fetcher=fetch,timeout=120000}={}){Object.assign(this,{store,vault,fetcher,timeout});}
   configured(){return this.vault.configured();}

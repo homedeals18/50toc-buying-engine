@@ -111,6 +111,7 @@ export class MatchingService{
       const context=await this.get(key);
       const offers=await this.store.offers();
       const source=offers.find(o=>o.productKey===key);
+      if(source?.retailer!=='costco')throw new AppError('DETAIL_MODULE_UNAVAILABLE','Use Sam’s Club Research’s selected-club verification to collect product details. Automatic UPC lookup currently supports Costco only.');
       const id=source?.productId||source?.itemNumber;
       if(!id)throw new AppError('RETAILER_ID_MISSING','This product has no retailer item or product ID for the detail lookup.');
       const response=await this.provider.call('costco/product',{country:'us',item_ids:[id]});

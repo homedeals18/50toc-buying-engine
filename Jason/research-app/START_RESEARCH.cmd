@@ -6,7 +6,7 @@ if not exist "runtime\node.exe" (
   pause
   exit /b 1
 )
-echo Starting 50TOC Jason Buying Engine 0.5 - LIVE mode.
+echo Starting 50TOC Jason Buying Engine 0.6 - LIVE mode.
 echo Close any older 50TOC or DEMO service window first.
 echo Open the local address printed below. Keep this window open.
 "runtime\node.exe" server\main.mjs --open-browser

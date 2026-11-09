@@ -13,7 +13,10 @@ export class DemoProvider {
     this.calls.push({endpoint,body});
     await new Promise(r=>setTimeout(r,60));
     let data;
-    if(endpoint==='costco/categories')data={categories};
+    if(endpoint==='samsclub/clubs')data={clubs:[{club_id:'6372',name:'Synthetic Sam’s Club',address:'Demonstration location only'}]};
+    else if(endpoint==='samsclub/product')data={item_id:body.item_id,product_id:'SYNTHETIC'+body.item_id,title:'Example Brand Coolmint Mouthwash, 1.5 L, 2-pack',brand:'Example Brand',upc:'012345678905',price:19.99,club:{club_id:body.club_id},club_price:{price:14.49,was_price:18.49,savings_amount:4},in_stock_at_club:true,instant_savings:{amount:4,end_date:'2026-11-30',message:'Synthetic $4 savings, already included'}};
+    else if(endpoint==='samsclub/savings'||endpoint==='samsclub/category')data={club:{club_id:'9999',city:'Synthetic provider location'},page:body.page,total_pages:2,products:[{item_id:String(90000+body.page),product_id:'SYNTHETIC'+body.page,title:'Example Brand Coolmint Mouthwash, 1.5 L, 2-pack',brand:'Example Brand',price:19.99,savings_amount:4,instant_savings:{amount:4,end_date:'Nov 30',message:'Synthetic $4 savings, already included'}}]};
+    else if(endpoint==='costco/categories')data={categories};
     else if(endpoint==='costco/warehouses')data={warehouses:[{warehouse_id:'1062',name:'Example Warehouse North',address:'Synthetic demonstration location'},{warehouse_id:'306',name:'Example Warehouse South',address:'Synthetic demonstration location'}]};
     else if(endpoint==='costco/product')data={products:items.filter(i=>(body.item_ids??[body.item_id]).some(id=>[i.item_number,i.product_id].includes(id))).map(i=>({...i,specifications:i===items[0]?[{name:'UPC',value:'012345678905'}]:[]}))};
     else if(endpoint==='google/customsearch'){

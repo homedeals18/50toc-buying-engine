@@ -1,4 +1,4 @@
-50TOC JASON CORE WORKFLOW 0.5 - TEST GUIDE
+50TOC JASON CORE WORKFLOW 0.6 - TEST GUIDE
 
 START THE CORRECT VERSION
 1. Close the command window for any older 50TOC service.
@@ -6,7 +6,7 @@ START THE CORRECT VERSION
 3. START_DEMO.cmd uses synthetic examples and no credits. Real key fields are disabled.
    START_RESEARCH.cmd is LIVE and uses your own Scavio and Keepa connections.
 4. Open http://127.0.0.1:8876 in Chrome, Edge or the ChatGPT browser on this computer.
-   The footer should say Core workflow 0.5. A DEMO banner means no real API searches.
+   The footer should say Core workflow 0.6. A DEMO banner means no real API searches.
 5. Leave the service window open. Screen-off is fine; sleep pauses local work.
 
 EXISTING DATA
@@ -78,3 +78,14 @@ Photo/receipt OCR, direct Amazon fee/restriction checks, broader candidate searc
 alternate-pack conversion, SMS/email, seller SKU creation and hosted access remain
 disconnected or deferred. Receipt evidence can be uploaded and reviewed manually.
 Do not use a demo/example record as a real purchase authorization.
+
+0.6 RESEARCH CHECKS
+Costco: verify the new warehouse/coupon/online price columns and sale end date.
+Use Verify warehouse coupons for current club prices; do not subtract online
+savings from the warehouse price. Missing/conflicting prices must hold Analysis.
+Sam’s Club: Find nearby, select club(s), choose All departments or add specific
+department links. Choose Instant Savings / Clearance and Scan Deals. Review the
+source-club identity and Discovery price. Plan selected-club checks shows total
+possible credits before Start. Confirm final club prices are not discounted twice.
+Stop/Resume must preserve every saved page; credit errors must retain all results.
+Run these first in DEMO without credits, then live with a small selected department.

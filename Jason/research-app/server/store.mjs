@@ -1,4 +1,5 @@
 import {syncProductProfile} from './enrichment.mjs';
+import {decoratePrice} from './pricing.mjs';
 const ns='jason_research.';
 const json=x=>JSON.stringify(x);
 const merge=(old, next)=>({
@@ -59,14 +60,23 @@ export class Store {
   async offers({scanId=null, search='', decision='all'}={}){
     const rows=scanId?(await this.db.query('SELECT body FROM '+ns+'scan_offers WHERE scan_id=$1',[scanId])).rows:(await this.db.query('SELECT body FROM '+ns+'offers')).rows;
     const q=search.toLocaleLowerCase();
-    return rows.map(r=>r.body).filter(o=>(decision==='all'||o.disposition===decision)&&(!q||[o.title,o.brand,o.upc,o.itemNumber,o.warehouseId,...o.categories.map(c=>c.name)].join(' ').toLocaleLowerCase().includes(q))).sort((a,b)=>a.title.localeCompare(b.title)||a.id.localeCompare(b.id));
+    const offers=rows.map(r=>r.body).filter(o=>(decision==='all'||o.disposition===decision)&&(!q||[o.title,o.brand,o.upc,o.itemNumber,o.warehouseId,...o.categories.map(c=>c.name)].join(' ').toLocaleLowerCase().includes(q))).sort((a,b)=>a.title.localeCompare(b.title)||a.id.localeCompare(b.id));
+    return this.decorateOffers(offers,{historical:!!scanId});
+  }
+  async decorateOffers(offers,{historical=false}={}){
+    const checks=historical?new Map():new Map((await this.db.query('SELECT offer_id,body FROM '+ns+'warehouse_price_checks')).rows.map(r=>[r.offer_id,r.body]));
+    const details=historical?[]:(await this.db.query('SELECT body FROM '+ns+'upc_lookup_reports ORDER BY observed_at DESC')).rows.map(r=>r.body).filter(r=>r.detail?.product);
+    return offers.map(o=>{
+      const detail=details.find(r=>r.productKey===o.productKey&&String(r.detail.product.item_number??'')===o.itemNumber&&Date.parse(r.detail.observedAt)>=Date.parse(o.observedAt))?.detail;
+      return decoratePrice(o,checks.get(o.id),detail?.product);
+    });
   }
   async offer(id,scanId=null){
     const table=scanId?'scan_offers':'offers';
     const rows=(await this.db.query('SELECT body FROM '+ns+table+' WHERE '+(scanId?'scan_id=$2 AND offer_id':'id')+'=$1',scanId?[id,scanId]:[id])).rows;
     if(!rows.length)return null;
     const correction=(await this.db.query('SELECT body FROM '+ns+'corrections WHERE offer_id=$1',[id])).rows[0]?.body??null;
-    return {...rows[0].body,manualCorrection:correction};
+    return {...(await this.decorateOffers([rows[0].body],{historical:!!scanId}))[0],manualCorrection:correction};
   }
   async sourcePages(scanId){return (await this.db.query('SELECT task_id,page,observed_at,cached,body FROM '+ns+'source_pages WHERE scan_id=$1 ORDER BY id',[scanId])).rows;}
 }

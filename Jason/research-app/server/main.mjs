@@ -30,7 +30,7 @@ try{
     if(!await app.store.get('preferences'))await app.store.set('preferences',{warehouses:['1062'],categoryIds:[categories[0].id],dealTypes:['clearance','manager_markdown']});
   }
   const base=await app.listen(Number(process.env.PORT)||8876);
-  console.log('50TOC Jason Buying Engine 0.5: '+base);
+  console.log('50TOC Jason Buying Engine 0.6: '+base);
   console.log(demo?'DEMO — synthetic products only; no API calls.':'LOCAL — connect Scavio in Settings. No Python is required.');
   console.log('Storage: '+db.mode+'. Keep this service open while scans run.');
   if(process.platform==='win32'&&process.argv.includes('--open-browser')){

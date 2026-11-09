@@ -16,23 +16,26 @@ import {AccessService} from './access.mjs';
 import {KeepaClient,DemoKeepaClient,CatalogService} from './catalog.mjs';
 import {WorkflowService} from './workflow.mjs';
 import {ReceiptService} from './receipts.mjs';
+import {PriceService} from './pricing.mjs';
+import {SamsResearchEngine,samsPlan,samsCategory,samsDealTypes} from './sams.mjs';
 
 export async function createApp({db,dataDir,provider:injectedProvider,vault:injectedVault,keepa:injectedKeepa,retryDelay=1500,demo=false}){
   const store=new Store(db),vault=injectedVault??new KeyVault(dataDir),provider=injectedProvider??new ScavioProvider(store,vault);
   const engine=new ResearchEngine(store,provider,{retryDelay}),session=randomUUID();
   await engine.initialize();
+  const sams=new SamsResearchEngine(store,provider);
   const enrichment=new EnrichmentService(store);
   enrichment.initialize();
   const matching=new MatchingService(store,enrichment,provider);
   const upcLookup=new UpcLookupService(store,matching,provider,enrichment);
   await upcLookup.initialize();
   const access=new AccessService(db),keepaVault=new KeyVault(dataDir,{name:'keepa',envName:'KEEPA_API_KEY'}),keepa=injectedKeepa??(demo?new DemoKeepaClient():new KeepaClient(store,keepaVault));
-  const catalog=new CatalogService(store,matching,keepa,{demo}),workflow=new WorkflowService(store,matching,catalog),receipts=new ReceiptService(db);
+  const catalog=new CatalogService(store,matching,keepa,{demo}),workflow=new WorkflowService(store,matching,catalog),receipts=new ReceiptService(db),prices=new PriceService(store,provider);
   matching.catalogConnected=()=>!demo&&keepa.configured();
   let monitorTimer,monitoring=false;
   let base;
   const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer',
-    'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://gdx-assets.costco.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"};
+    'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://gdx-assets.costco.com https://i5.samsclubimages.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"};
   function send(res,body,status=200,type='application/json; charset=utf-8'){
     res.writeHead(status,{...headers,'Content-Type':type});res.end(type.startsWith('application/json')?JSON.stringify(body):body);
   }
@@ -68,8 +71,25 @@ export async function createApp({db,dataDir,provider:injectedProvider,vault:inje
       if(p==='/api/worker/submit'&&req.method==='POST'){send(res,await workflow.submit(body,user));return;}
       if(p==='/api/receipts/upload'&&req.method==='POST'){send(res,await receipts.upload(body,user));return;}
       if(p==='/api/receipts/file'&&req.method==='GET'){send(res,await receipts.read(url.searchParams.get('id'),user));return;}
-      if(user.role==='worker'&&p==='/api/state'&&req.method==='GET'){send(res,{version:'Jason Buying Engine 0.5',demo,user});return;}
+      if(user.role==='worker'&&p==='/api/state'&&req.method==='GET'){send(res,{version:'Jason Buying Engine 0.6',demo,user});return;}
       access.require(user);
+      if(p==='/api/sams/state'&&req.method==='GET'){send(res,{clubs:await store.get('sams_clubs',[]),categories:await store.get('sams_categories',[]),preferences:await store.get('sams_preferences',{clubs:[],categoryIds:['all'],dealTypes:['instant_savings']}),dealTypes:samsDealTypes,jobs:(await store.jobs()).filter(j=>j.scope?.retailer==='samsclub')});return;}
+      if(p==='/api/sams/clubs'&&req.method==='POST'){
+        if(!/^\d{5}$/.test(String(body.zip)))throw new AppError('ZIP_INVALID','Enter a five-digit ZIP code.');
+        const r=await provider.call('samsclub/clubs',{zip:String(body.zip),limit:20},body.force===true);
+        if(!Array.isArray(r.json?.data?.clubs))throw new AppError('SAMS_CLUB_SCHEMA_CHANGED','Scavio did not return a usable club list.',{status:502});
+        const clubs=r.json.data.clubs.filter(c=>/^\d{1,20}$/.test(String(c.club_id))),all=[...new Map([...(await store.get('sams_clubs',[])),...clubs].map(c=>[String(c.club_id),c])).values()];await store.set('sams_clubs',all);send(res,{clubs:all,cached:r.cached});return;
+      }
+      if(p==='/api/sams/categories'&&req.method==='POST'){const c=samsCategory(body),all=[...new Map([...(await store.get('sams_categories',[])),c].map(c=>[c.id,c])).values()];await store.set('sams_categories',all);send(res,{categories:all});return;}
+      if(p==='/api/sams/plan'&&req.method==='POST'){const plan=samsPlan(body,await store.get('sams_categories',[]));send(res,{...plan,taskCount:plan.tasks.length});return;}
+      if(p==='/api/sams/scans'&&req.method==='POST'){if(engine.starting||engine.running||upcLookup.busy||matching.lookupActive||prices.busy)throw new AppError('SCAN_ACTIVE','Finish other source lookups first.',{status:409});send(res,{job:await sams.create(body)},202);return;}
+      if(p==='/api/sams/verify-plan'&&req.method==='POST'){const plan=await sams.verificationPlan(body);send(res,{items:plan.items.length,clubs:plan.clubs,requests:plan.requests});return;}
+      if(p==='/api/sams/verify'&&req.method==='POST'){if(engine.starting||engine.running||upcLookup.busy||matching.lookupActive||prices.busy)throw new AppError('SCAN_ACTIVE','Finish other source lookups first.',{status:409});send(res,{job:await sams.verify(body)},202);return;}
+      if(p==='/api/prices/plan'&&req.method==='POST'){const plan=await prices.plan(body);send(res,{scope:plan.scope,offers:plan.offers.length,items:plan.items.length,warehouses:plan.warehouses,requests:plan.requests,explanation:plan.explanation});return;}
+      if(p==='/api/prices/check'&&req.method==='POST'){
+        if(engine.starting||engine.running||sams.starting||sams.running||upcLookup.busy)throw new AppError('SCAN_ACTIVE','Finish or pause Research and UPC lookup before checking warehouse coupons.',{status:409});
+        send(res,await prices.refresh(body));return;
+      }
       if(p==='/api/accounts'&&req.method==='GET'){send(res,{users:await access.users(),local:user.local===true});return;}
       if(p==='/api/accounts'&&req.method==='POST'){
         const created=await access.add(body,user);if(user.local){const logged=await access.login(body);res.setHeader('Set-Cookie',logged.cookie);}send(res,{user:created});return;
@@ -101,14 +121,14 @@ export async function createApp({db,dataDir,provider:injectedProvider,vault:inje
       if(p==='/api/workflow/history'&&req.method==='GET'){send(res,{history:await workflow.history(url.searchParams.get('id'),user)});return;}
       if(p==='/api/receipts/reconcile'&&req.method==='POST'){send(res,await receipts.reconcile(body,user));return;}
       if(p==='/api/state'&&req.method==='GET'){
-        send(res,{version:'Jason Buying Engine 0.5',demo,user,keepaConfigured:keepa.configured(),keepaStorageMode:demo?'demo':keepaVault.mode(),databaseMode:db.mode,configured:provider.configured(),keyStorageMode:demo?'demo':vault.mode(),enrichmentPreparing:enrichment.preparing,
+        send(res,{version:'Jason Buying Engine 0.6',demo,user,keepaConfigured:keepa.configured(),keepaStorageMode:demo?'demo':keepaVault.mode(),databaseMode:db.mode,configured:provider.configured(),keyStorageMode:demo?'demo':vault.mode(),enrichmentPreparing:enrichment.preparing,
           categories:await store.get('categories',[]),warehouses:await store.get('warehouses',[]),
           preferences:await store.get('preferences',{warehouses:[],categoryIds:[],dealTypes:['clearance','manager_markdown']}),
-          rules:await store.get('rules',{flagVariety:true,flagPerishable:true}),jobs:await store.jobs(),dealTypes,coverage,priceLimit:null,analysisConnected:true});return;
+          rules:await store.get('rules',{flagVariety:true,flagPerishable:true}),jobs:(await store.jobs()).filter(j=>j.scope?.retailer!=='samsclub'),dealTypes,coverage,priceLimit:null,analysisConnected:true});return;
       }
       if(p==='/api/key'&&req.method==='POST'){
         if(demo)throw new AppError('DEMO_MODE','Open the live version to connect Scavio.');
-        if(engine.starting||engine.running||upcLookup.busy)throw new AppError('SCAN_ACTIVE','Stop the active Research or UPC lookup before changing connections.',{status:409});
+        if(engine.starting||engine.running||sams.starting||sams.running||upcLookup.busy||prices.busy)throw new AppError('SCAN_ACTIVE','Stop the active Research, UPC lookup or price check before changing connections.',{status:409});
         await vault.save(body.key,{sessionOnly:body.storage==='session'});send(res,{configured:true});return;
       }
       if(p==='/api/usage'&&req.method==='POST'){send(res,await provider.usage());return;}
@@ -128,17 +148,20 @@ export async function createApp({db,dataDir,provider:injectedProvider,vault:inje
       }
       if(p==='/api/plan'&&req.method==='POST'){const plan=planScan(body,await store.get('categories',[]));send(res,{...plan,taskCount:plan.tasks.length});return;}
       if(p==='/api/scans'&&req.method==='POST'){
-        if(upcLookup.busy||matching.lookupActive)throw new AppError('UPC_LOOKUP_ACTIVE','Stop UPC lookup before starting Research.',{status:409});
+        if(upcLookup.busy||matching.lookupActive||prices.busy||sams.starting||sams.running)throw new AppError('UPC_LOOKUP_ACTIVE','Stop active source lookups before starting Research.',{status:409});
         send(res,{job:await engine.create(body)},202);return;
       }
       const action=p.match(/^\/api\/scans\/([a-zA-Z0-9-]+)\/(stop|resume)$/);
       if(action&&req.method==='POST'){
         if(action[2]==='resume'&&(upcLookup.busy||matching.lookupActive))throw new AppError('UPC_LOOKUP_ACTIVE','Stop UPC lookup before resuming Research.',{status:409});
-        send(res,{job:await (action[2]==='stop'?engine.stop(action[1]):engine.resume(action[1]))});return;
+        const job=await store.job(action[1]),worker=job?.scope?.retailer==='samsclub'?sams:engine;
+        if(action[2]==='resume'&&(prices.busy||sams.starting||engine.starting||await store.active()))throw new AppError('SCAN_ACTIVE','Wait for active source work to finish.',{status:409});
+        send(res,{job:await (action[2]==='stop'?worker.stop(action[1]):worker.resume(action[1]))});return;
       }
       if(p==='/api/rules'&&req.method==='POST'){await store.set('rules',{flagVariety:body.flagVariety!==false,flagPerishable:body.flagPerishable!==false});send(res,{ok:true});return;}
       if(p==='/api/offers'&&req.method==='GET'){
-        const all=await store.offers({scanId:url.searchParams.get('scanId'),search:url.searchParams.get('q')??'',decision:url.searchParams.get('decision')??'all'});
+        const retailer=url.searchParams.get('retailer');
+        const all=(await store.offers({scanId:url.searchParams.get('scanId'),search:url.searchParams.get('q')??'',decision:url.searchParams.get('decision')??'all'})).filter(o=>!retailer||o.retailer===retailer);
         const page=Math.max(1,Number.parseInt(url.searchParams.get('page'))||1);
         send(res,{total:all.length,page,offers:all.slice((page-1)*50,page*50)});return;
       }
@@ -177,18 +200,18 @@ export async function createApp({db,dataDir,provider:injectedProvider,vault:inje
       if(p==='/api/matching/candidate'&&req.method==='POST'){send(res,await matching.saveCandidate(body.productKey,{...body,actor:user.username}));return;}
       if(p==='/api/matching/history'&&req.method==='GET'){send(res,{history:await matching.candidateHistory(url.searchParams.get('productKey'),url.searchParams.get('asin'))});return;}
       if(p==='/api/matching/retailer-details'&&req.method==='POST'){
-        if(engine.starting||engine.running||upcLookup.busy)throw new AppError('SCAN_ACTIVE','Wait for Research or automatic UPC lookup to finish before a separate detail lookup.',{status:409});
+        if(engine.starting||engine.running||sams.starting||sams.running||upcLookup.busy)throw new AppError('SCAN_ACTIVE','Wait for Research or automatic UPC lookup to finish before a separate detail lookup.',{status:409});
         send(res,await matching.retailerDetails(body.productKey));return;
       }
       if(p==='/api/upc-lookup'&&req.method==='GET'){send(res,await upcLookup.state());return;}
       if(p==='/api/upc-lookup/plan'&&req.method==='POST'){send(res,await upcLookup.plan(body));return;}
       if(p==='/api/upc-lookup/start'&&req.method==='POST'){
-        if(engine.starting||engine.running||matching.lookupActive)throw new AppError('SCAN_ACTIVE','Finish the active Research or manual detail request before UPC lookup.',{status:409});
+        if(engine.starting||engine.running||sams.starting||sams.running||prices.busy||matching.lookupActive)throw new AppError('SCAN_ACTIVE','Finish the active Research or manual detail request before UPC lookup.',{status:409});
         send(res,await upcLookup.start(body),202);return;
       }
       if(p==='/api/upc-lookup/stop'&&req.method==='POST'){send(res,await upcLookup.stop());return;}
       if(p==='/api/upc-lookup/resume'&&req.method==='POST'){
-        if(engine.starting||engine.running||matching.lookupActive)throw new AppError('SCAN_ACTIVE','Finish Research or the manual detail request before resuming UPC lookup.',{status:409});
+        if(engine.starting||engine.running||sams.starting||sams.running||prices.busy||matching.lookupActive)throw new AppError('SCAN_ACTIVE','Finish Research or the manual detail request before resuming UPC lookup.',{status:409});
         send(res,await upcLookup.resume(),202);return;
       }
       if(p==='/api/matching/export'&&req.method==='GET'){
@@ -206,9 +229,9 @@ export async function createApp({db,dataDir,provider:injectedProvider,vault:inje
       send(res,safeError(e),e.status);
     }
   });
-  return {server,store,engine,provider,session,enrichment,matching,upcLookup,access,catalog,workflow,receipts,
+  return {server,store,engine,sams,provider,session,enrichment,matching,upcLookup,access,catalog,workflow,receipts,
     async listen(port=8876){await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});base='http://127.0.0.1:'+server.address().port;
       monitorTimer=setInterval(async()=>{if(monitoring)return;monitoring=true;try{await workflow.monitor({id:'local-monitor',username:'Local daily monitor',role:'manager'});}catch(error){try{await store.event(eventFor(error,'daily_queue_check'));}catch{}}finally{monitoring=false;}},60000);monitorTimer.unref();return base;},
-    async close(){clearInterval(monitorTimer);while(monitoring)await new Promise(r=>setTimeout(r,10));await upcLookup.close();await engine.close();await enrichment.close();await new Promise(resolve=>server.close(resolve));await db.close();}
+    async close(){clearInterval(monitorTimer);while(monitoring)await new Promise(r=>setTimeout(r,10));await upcLookup.close();await engine.close();await sams.close();await enrichment.close();await new Promise(resolve=>server.close(resolve));await db.close();}
   };
 }

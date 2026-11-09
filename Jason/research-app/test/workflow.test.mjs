@@ -29,6 +29,25 @@ async function buy(s,qty=1,rid='purchase-request-0001'){
   const input={targetId:t.id,revision:t.revision,quantity:qty,unitPrice:19.97,tax:0,warehouse:'1062',requestId:rid};return {input,...await s.app.workflow.purchase(input,worker)};
 }
 
+test('unverified warehouse coupons hold analysis; verified final price reaches ROI and approval exactly once',async()=>{
+  const s=await setup();
+  try{
+    const raw={...s.offer,dealTypes:['on_sale'],sourceData:{item:{...s.offer.sourceData.item,promotions:['$4 online savings']}}};
+    await s.db.query('UPDATE jason_research.offers SET body=$2::jsonb WHERE id=$1',[raw.id,JSON.stringify(raw)]);
+    let item=(await s.app.workflow.analyze({productKey:s.key,asin:'B000000001',offerId:raw.id,revision:s.item.revision,values:values()},owner)).item;
+    assert.equal(item.result.route,'needs_information');
+    const check={offerId:raw.id,observedAt:current(),status:'verified',basePrice:19.97,discountAmount:4,finalPrice:15.97,endDate:'2099-11-30'};
+    await s.db.query('INSERT INTO jason_research.warehouse_price_checks VALUES($1,$2,$3::jsonb)',[raw.id,check.observedAt,JSON.stringify(check)]);
+    item=(await s.app.workflow.analyze({productKey:s.key,asin:'B000000001',offerId:raw.id,revision:item.revision,values:{...values(),clubPrice:15.97}},owner)).item;
+    assert.equal(item.result.route,'normal');assert.equal(item.values.clubPrice,15.97);assert.equal(item.result.completeCost,17.47);
+    await s.app.workflow.decision({itemId:item.id,revision:item.revision,action:'approve',targetUnits:1,maxPrice:15.97,warehouses:['1062'],acknowledgeEligibility:true,note:'Synthetic coupon check only'},owner);
+    assert.equal((await s.app.workflow.state(owner)).targets[0].maxPrice,15.97);
+    await s.db.query('UPDATE jason_research.warehouse_price_checks SET body=$2::jsonb WHERE offer_id=$1',[raw.id,JSON.stringify({...check,status:'unavailable',finalPrice:null})]);
+    const target=(await s.app.workflow.workerState(worker)).targets[0];
+    await assert.rejects(s.app.workflow.purchase({targetId:target.id,revision:target.revision,quantity:1,unitPrice:15.97,tax:0,warehouse:'1062',requestId:'synthetic-coupon-held'},worker),e=>e.code==='BUYING_HELD');
+  }finally{await s.close();}
+});
+
 test('complete-cost ROI uses net proceeds over complete cost and never subtracts rewards',()=>{
   const r=evaluateProfit({...values(),clubPrice:10,workerAllowance:0,prepShipping:0,buyBoxPrice:20,amazonFees:5,cashback:999},controls());assert.equal(r.profit,5);assert.equal(r.roi,50);assert.equal(r.completeCost,10);assert.equal(r.purchaseApproved,false);
   const unknown=evaluateProfit({...values(),amazonFees:null},controls());assert.equal(unknown.route,'needs_information');assert.equal(unknown.profit,null);

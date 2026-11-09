@@ -1,4 +1,4 @@
-50TOC JASON CORE BUYING WORKFLOW 0.5 - UPGRADE
+50TOC JASON CORE BUYING WORKFLOW 0.6 - UPGRADE
 
 1. Stop both old and new 50TOC services before moving data.
 2. Back up the old application's ENTIRE data folder.
@@ -7,7 +7,7 @@
    FIFTYTOC_DATA_DIR to the existing data directory. Keep live and demo separate.
 5. Run START_RESEARCH.cmd for LIVE, START_DEMO.cmd for synthetic demonstration.
    Close any older service using port 8876, then refresh the browser. Verify the
-   footer says Core workflow 0.5 and that live mode has no DEMO banner.
+   footer says Core workflow 0.6 and that live mode has no DEMO banner.
 
 Existing Jason 0.1, 0.2 and 0.3 PostgreSQL/PGlite data is retained by additive
 migrations. Research, enrichment, corrections, UPC and candidate history remain.

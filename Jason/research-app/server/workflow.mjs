@@ -3,6 +3,7 @@ import {AppError} from './errors.mjs';
 import {profitDefaults,validateProfitSettings,evaluateProfit,number,money,text,round} from './profit.mjs';
 import {exactMatch} from './exact-rules.mjs';
 import {normalizeOffer} from './costco.mjs';
+import {decoratePrice} from './pricing.mjs';
 const ns='jason_research.',json=JSON.stringify,keyFor=(...xs)=>createHash('sha256').update(json(xs)).digest('hex');
 const now=()=>new Date().toISOString();
 const manager=actor=>{if(actor?.role!=='manager')throw new AppError('MANAGER_REQUIRED','Full access is required.',{status:403});};
@@ -11,8 +12,10 @@ async function audit(db,id,action,actor,before,after,note=''){await db.query('IN
 function checkRevision(input,current){if(input.revision!==(current?.revision??0))throw new AppError('WORKFLOW_CHANGED','This record changed. Refresh before saving.',{status:409});}
 const rows=async(db,table)=> (await db.query('SELECT body FROM '+ns+table)).rows.map(r=>r.body);
 const purchaseFor=(p,actor)=>{const {approvalSnapshot,...workerRecord}=p;return actor.role==='manager'?p:workerRecord;};
-const offerEnd=offer=>offer?.coupon?.validTo??offer?.sourceData?.item?.promotion_end??offer?.sourceData?.item?.sale_end??null;
-const expired=offer=>{const end=offerEnd(offer);return !!end&&Number.isFinite(Date.parse(end))&&Date.parse(end)+(String(end).length===10?86400000:0)<Date.now();};
+const offerEnd=offer=>[offer?.saleEndDate,offer?.coupon?.validTo,offer?.sourceData?.item?.promotion_end,offer?.sourceData?.item?.sale_end].find(v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(v)&&Number.isFinite(Date.parse(v)))??null;
+const purchasePrice=offer=>Object.hasOwn(offer??{},'warehousePurchasePrice')?offer.warehousePurchasePrice:offer?decoratePrice(offer).warehousePurchasePrice:null;
+async function pricedOffer(db,offer){if(!offer)return null;const check=(await db.query('SELECT body FROM '+ns+'warehouse_price_checks WHERE offer_id=$1',[offer.id])).rows[0]?.body;return decoratePrice(offer,check);}
+const expired=offer=>{const end=offerEnd(offer);if(!end||!Number.isFinite(Date.parse(end)))return false;if(String(end).length===10)return new Intl.DateTimeFormat('en-CA',{timeZone:offer.retailer==='costco'?'America/Los_Angeles':'America/New_York'}).format(new Date())>end;return Date.parse(end)<Date.now();};
 
 export class WorkflowService{
   constructor(store,matching,catalog){Object.assign(this,{store,matching,catalog});this.db=store.db;}
@@ -34,7 +37,7 @@ export class WorkflowService{
     const files=(await this.db.query('SELECT f.submission_id,r.body FROM '+ns+'submission_files f JOIN '+ns+'receipts r ON r.id=f.receipt_id')).rows;
     for(const s of submissions)s.files=files.filter(f=>f.submission_id===s.id).map(f=>f.body);
     const offers=await this.store.offers(),dealAlerts=targets.flatMap(t=>offers.filter(o=>o.productKey===t.productKey&&t.warehouses.includes(o.warehouseId)).flatMap(o=>{
-      const result=[];if(o.warehousePrice!==null&&o.warehousePrice<t.maxPrice)result.push({type:'price_drop',targetId:t.id,title:t.title,warehouseId:o.warehouseId,price:o.warehousePrice,approvedPrice:t.maxPrice,observedAt:o.observedAt});const end=offerEnd(o);if(end)result.push({type:'sale_date',targetId:t.id,title:t.title,warehouseId:o.warehouseId,end,expired:expired(o)});return result;
+      const result=[];if(purchasePrice(o)!==null&&purchasePrice(o)<t.maxPrice)result.push({type:'price_drop',targetId:t.id,title:t.title,warehouseId:o.warehouseId,price:purchasePrice(o),approvedPrice:t.maxPrice,observedAt:o.observedAt});const end=offerEnd(o);if(end)result.push({type:'sale_date',targetId:t.id,title:t.title,warehouseId:o.warehouseId,end,expired:expired(o)});return result;
     }));
     return {settings:await this.settings(),items,targets,purchases,payments,blocks,submissions,adjustments,receipts,dealAlerts,visits:await rows(this.db,'visit_plans'),reservations:(await this.db.query('SELECT * FROM '+ns+'unit_reservations WHERE units>0')).rows,localOnly:true,smsConnected:false,receiptOcrConnected:false};
   }
@@ -61,7 +64,7 @@ export class WorkflowService{
     const values=this.cleanInput(input.values??{},settings),id=keyFor(productKey,asin),blocks=await rows(this.db,'product_blocks');
     const isBlocked=blocks.some(b=>b.active&&b.productKey===productKey&&(!b.asin||b.asin===asin));
     const result=evaluateProfit(values,settings,{matchRoute:context.candidate.result.route,blocked:isBlocked,expired:expired(offer),stale:context.profile.sourceChanged});
-    if(offer.warehousePrice===null||values.clubPrice!==offer.warehousePrice){result.missing.push('Confirm the selected warehouse price through current Research.');if(!['blocked','reject'].includes(result.route))result.route='needs_information';}
+    if(purchasePrice(offer)===null||values.clubPrice!==purchasePrice(offer)){result.missing.push('Confirm the selected warehouse price and any warehouse coupon through current price checking.');if(!['blocked','reject'].includes(result.route))result.route='needs_information';}
     if(Date.now()-Date.parse(offer.warehousePriceObservedAt??offer.observedAt)>24*3600000){result.missing.push('Refresh the warehouse price; its observation is stale.');if(!['blocked','reject'].includes(result.route))result.route='needs_information';}
     return this.db.transaction(async db=>{
       await db.query('SELECT id FROM '+ns+'products WHERE id=$1 FOR UPDATE',[productKey]);
@@ -105,9 +108,9 @@ export class WorkflowService{
         const currentProfile=(await db.query('SELECT body FROM '+ns+'enrichment_profiles WHERE product_key=$1',[item.productKey])).rows[0]?.body;
         const currentCandidate=(await db.query('SELECT body FROM '+ns+'amazon_candidates WHERE product_key=$1 AND asin=$2',[item.productKey,item.asin])).rows[0]?.body;
         const currentUpc=(await db.query('SELECT body FROM '+ns+'product_upcs WHERE product_key=$1',[item.productKey])).rows[0]?.body;
-        const currentOffer=(await db.query('SELECT body FROM '+ns+'offers WHERE id=$1',[item.offerId])).rows[0]?.body;
+        const currentOffer=await pricedOffer(db,(await db.query('SELECT body FROM '+ns+'offers WHERE id=$1',[item.offerId])).rows[0]?.body);
         const liveSettings=await this.settings(db);
-        if(!currentOffer||currentOffer.warehousePrice===null||currentOffer.warehousePrice>item.values.clubPrice||Date.now()-Date.parse(currentOffer.warehousePriceObservedAt??currentOffer.observedAt)>24*3600000)throw new AppError('PRICE_REANALYZE','Refresh and analyze the current warehouse price before approving.');
+        if(!currentOffer||purchasePrice(currentOffer)===null||purchasePrice(currentOffer)>item.values.clubPrice||Date.now()-Date.parse(currentOffer.warehousePriceObservedAt??currentOffer.observedAt)>24*3600000)throw new AppError('PRICE_REANALYZE','Refresh and analyze the current warehouse price, including verified warehouse coupons, before approving.');
         const blocks=(await db.query('SELECT body FROM '+ns+'product_blocks WHERE product_key=$1 AND active=TRUE',[item.productKey])).rows.map(r=>r.body);
         const result=evaluateProfit(item.values,liveSettings,{matchRoute:currentCandidate&&currentProfile?exactMatch(currentProfile,currentUpc,currentCandidate).route:'needs_information',blocked:blocks.some(b=>!b.asin||b.asin===item.asin),expired:expired(currentOffer),stale:currentProfile?.sourceChanged||currentProfile?.sourceSignature!==item.sourceSignature||currentProfile?.revision!==item.profileRevision||currentCandidate?.revision!==item.candidateRevision||(currentUpc?.revision??0)!==item.upcRevision});
         if(!['normal','close'].includes(result.route))throw new AppError('APPROVAL_BLOCKED','This opportunity cannot be approved: '+[...result.missing,...result.failures].join(' '));
@@ -144,9 +147,9 @@ export class WorkflowService{
         const t=(await db.query('SELECT body FROM '+ns+'buying_targets WHERE id=$1 FOR UPDATE',[old.id])).rows[0].body;if(t.checkDate===date)return;
         const reasons=[],currentOffers=offers.filter(o=>o.productKey===t.productKey&&t.warehouses.includes(o.warehouseId));
         if(context.profile.sourceSignature!==t.sourceSignature||context.profile.revision!==t.analysisSnapshot.profileRevision||context.candidate.revision!==t.candidateRevision||(context.upc?.revision??0)!==t.analysisSnapshot.upcRevision)reasons.push('Package or mapping evidence changed.');
-        if(currentOffers.some(o=>o.warehousePrice!==null&&o.warehousePrice>t.maxPrice))reasons.push('A permitted warehouse reports a higher price.');
+        if(currentOffers.some(o=>purchasePrice(o)!==null&&purchasePrice(o)>t.maxPrice))reasons.push('A permitted warehouse reports a higher price.');
         if(currentOffers.some(expired))reasons.push('A known offer expired.');
-        if(!currentOffers.length||currentOffers.every(o=>o.warehousePrice===null||Date.now()-Date.parse(o.warehousePriceObservedAt??o.observedAt)>settings.freshHours*3600000))reasons.push('Current warehouse price needs refreshing.');
+        if(!currentOffers.length||currentOffers.every(o=>purchasePrice(o)===null||Date.now()-Date.parse(o.warehousePriceObservedAt??o.observedAt)>settings.freshHours*3600000))reasons.push('Current warehouse price or coupon needs verifying.');
         const economics=evaluateProfit(t.analysisSnapshot.values,settings,{matchRoute:context.candidate.result.route});
         if(!['normal','close'].includes(economics.route)||economics.route==='close'&&!t.reviewException)reasons.push('Economics or controls require review.');
         t.checkDate=date;t.lastCheckAt=now();t.lastCheckResult=reasons.length?'held':'passed';if(reasons.length){t.status='held';t.holdReason=reasons.join(' ');}else t.lastSuccessfulCheckAt=now();
@@ -185,8 +188,8 @@ export class WorkflowService{
       const upc=(await db.query('SELECT body FROM '+ns+'product_upcs WHERE product_key=$1',[t.productKey])).rows[0]?.body;
       const controls=await this.settings(db),blocks=(await db.query('SELECT body FROM '+ns+'product_blocks WHERE product_key=$1 AND active=TRUE',[t.productKey])).rows.map(r=>r.body);
       if(!t.warehouses.includes(warehouse))throw new AppError('WAREHOUSE_NOT_APPROVED','This warehouse is outside the approved scope.');
-      const currentOffer=(await db.query('SELECT body FROM '+ns+'offers WHERE product_id=$1 AND warehouse_id=$2',[t.productKey,warehouse])).rows[0]?.body;
-      if(!currentOffer||currentOffer.warehousePrice===null||Date.now()-Date.parse(currentOffer.warehousePriceObservedAt??currentOffer.observedAt)>24*3600000||expired(currentOffer))throw new AppError('BUYING_HELD','Refresh the current warehouse price or expired offer before buying.');
+      const currentOffer=await pricedOffer(db,(await db.query('SELECT body FROM '+ns+'offers WHERE product_id=$1 AND warehouse_id=$2',[t.productKey,warehouse])).rows[0]?.body);
+      if(!currentOffer||purchasePrice(currentOffer)===null||Date.now()-Date.parse(currentOffer.warehousePriceObservedAt??currentOffer.observedAt)>24*3600000||expired(currentOffer))throw new AppError('BUYING_HELD','Refresh the current warehouse price, coupon or expired offer before buying.');
       const economics=evaluateProfit(t.analysisSnapshot.values,controls,{matchRoute:context&&candidate?exactMatch(context,upc,candidate).route:'needs_information',blocked:blocks.some(b=>!b.asin||b.asin===t.asin)});
       if(t.status!=='active'||context?.sourceSignature!==t.sourceSignature||context?.revision!==t.analysisSnapshot.profileRevision||candidate?.revision!==t.candidateRevision||(upc?.revision??0)!==t.analysisSnapshot.upcRevision||!['normal','close'].includes(economics.route)||economics.route==='close'&&(!t.reviewException||t.analysisSnapshot.settingsRevision!==controls.revision))throw new AppError('BUYING_HELD','Buying is held or approval evidence needs refreshing. Ask a full-access user to review.');
       if(unitPrice>t.maxPrice)throw new AppError('PRICE_ABOVE_APPROVAL','The price is above the approved maximum. Submit a price-change request before buying.');
